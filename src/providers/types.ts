@@ -27,6 +27,18 @@ interface ProviderSettingsConfig {
   SettingsSection: ComponentType;
 }
 
+interface LaunchOptionChoice {
+  value: string; // "" = provider default -> flag omitted entirely
+  label: string;
+}
+
+export interface LaunchOption {
+  key: string; // settings key AND providerData key (provider-owned, may differ per provider)
+  label: string;
+  description?: string; // optional helper line
+  choices: LaunchOptionChoice[]; // first entry should be the "" = "Provider default" option
+}
+
 /** Result of a CLI availability probe — whether the binary can be invoked
  *  and, when known, the version string for display. */
 interface ProviderAvailability {
@@ -40,6 +52,11 @@ export interface ProviderModule {
   assistantDisplayName: string;
   launcher: ProviderLauncherConfig;
   settings: ProviderSettingsConfig;
+
+  /** Provider-declared launch options surfaced as defaults in Settings and
+   *  per-session overrides in the New Session dialog. Each provider owns its
+   *  own keys/values — providers do NOT share option keys. */
+  launchOptions?: LaunchOption[];
 
   /** Probe whether the provider's CLI is available. The cliPath argument
    *  is the user's optional override from settings; when empty, the

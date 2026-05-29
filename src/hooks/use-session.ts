@@ -5,6 +5,7 @@ import { confirmDestructiveAction } from "@/lib/native-dialog";
 import { generateSessionTitle } from "@/lib/session-helpers";
 import { detectClaude } from "@/providers/claude-code/types";
 import { detectCodex } from "@/providers/codex/types";
+import { buildLaunchOptionData, pickLaunchOptionOverrides } from "@/providers/launch-options";
 import { useRepoStore } from "@/stores/repo-store";
 import { DEFAULT_LIVE_STATE, type Session, useSessionStore } from "@/stores/session-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -39,6 +40,7 @@ export interface StartSessionOptions {
   prompt?: string;
   providerId?: string | null;
   repoId?: string | null;
+  launchOptions?: Record<string, string>;
 }
 
 export interface StartTerminalSessionOptions {
@@ -53,30 +55,21 @@ function resolveWorkspace(repoId?: string | null) {
   return repo;
 }
 
-function buildProviderDataFromSettings(providerId: string, settings: Record<string, unknown>) {
+function buildProviderDataFromSettings(
+  providerId: string,
+  settings: Record<string, unknown>,
+  overrides?: Record<string, string>,
+) {
   const providerData: Record<string, string> = {};
-
+  // Identity seed, not a user-facing launch option: claim a sessionId up front
+  // and pass it to Claude via `--session-id` in the launcher. Without this,
+  // Claude picks its own id and AgTower falls back to timestamp-proximity
+  // matching in `extract_metadata`, which silently reassigns JSONLs between
+  // empty new sessions and then dedupes them (see `session_store.rs::dedup_sessions`).
   if (providerId === "claude-code") {
-    // Claim a sessionId up front and pass it to Claude via `--session-id` in
-    // the launcher. Without this, Claude picks its own id and AgTower falls
-    // back to timestamp-proximity matching in `extract_metadata`, which
-    // silently reassigns JSONLs between empty new sessions and then dedupes
-    // them (see `session_store.rs::dedup_sessions`).
     providerData.sessionId = crypto.randomUUID();
-    if (typeof settings.effort === "string" && settings.effort.trim()) {
-      providerData.effort = settings.effort.trim();
-    }
-    if (typeof settings.permissionMode === "string" && settings.permissionMode.trim()) {
-      providerData.permissionMode = settings.permissionMode.trim();
-    }
   }
-
-  if (providerId === "codex") {
-    if (typeof settings.approvalMode === "string" && settings.approvalMode.trim()) {
-      providerData.approvalMode = settings.approvalMode.trim();
-    }
-  }
-
+  Object.assign(providerData, buildLaunchOptionData(providerId, settings, overrides));
   return providerData;
 }
 
@@ -130,7 +123,11 @@ export function useSession() {
         // this to "idle" right after the PTY launches.
         status: "running",
         pid: null,
-        providerData: buildProviderDataFromSettings(providerId, providerSettings),
+        providerData: buildProviderDataFromSettings(
+          providerId,
+          providerSettings,
+          options.launchOptions,
+        ),
         model: buildProviderModelFromSettings(providerSettings),
         createdAt: Date.now(),
         endedAt: null,
@@ -215,7 +212,14 @@ export function useSession() {
       }
 
       const providerSettings = useSettingsStore.getState().providerSettings[session.provider] ?? {};
-      const providerData = buildProviderDataFromSettings(session.provider, providerSettings);
+      // Preserve the launch-option choices baked into the original session's
+      // providerData so a restart keeps the same permission mode / sandbox / etc.
+      const overrides = pickLaunchOptionOverrides(session.provider, session.providerData);
+      const providerData = buildProviderDataFromSettings(
+        session.provider,
+        providerSettings,
+        overrides,
+      );
       const model = buildProviderModelFromSettings(providerSettings);
 
       updateSession(sessionId, {

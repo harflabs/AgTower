@@ -25,6 +25,35 @@ const claudeCodeProvider: ProviderModule = {
   getActivityText: getClaudeActivityText,
   formatTokenSummary: formatClaudeTokenSummary,
   getProviderSessionId: getClaudeProviderSessionId,
+  launchOptions: [
+    {
+      key: "permissionMode",
+      label: "Permission mode",
+      description: "Passed as --permission-mode",
+      choices: [
+        { value: "", label: "Provider default" },
+        { value: "default", label: "default" },
+        { value: "acceptEdits", label: "acceptEdits" },
+        { value: "auto", label: "auto" },
+        { value: "plan", label: "plan" },
+        { value: "dontAsk", label: "dontAsk" },
+        { value: "bypassPermissions", label: "bypassPermissions" },
+      ],
+    },
+    {
+      key: "effort",
+      label: "Reasoning effort",
+      description: "Passed as --effort",
+      choices: [
+        { value: "", label: "Provider default" },
+        { value: "low", label: "low" },
+        { value: "medium", label: "medium" },
+        { value: "high", label: "high" },
+        { value: "xhigh", label: "xhigh" },
+        { value: "max", label: "max" },
+      ],
+    },
+  ],
 };
 
 registerProvider(claudeCodeProvider);

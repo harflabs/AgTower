@@ -19,7 +19,8 @@ function buildCodexLaunch(session: Session, mode: CommandMode = "new"): PtyLaunc
   const parts: string[] = [configuredPath || "codex"];
   const pd = session.providerData ?? {};
   const threadId = pd.threadId as string | null;
-  const approvalMode = pd.approvalMode as string | null;
+  const askForApproval = pd.askForApproval as string | null;
+  const sandbox = pd.sandbox as string | null;
 
   // Bare BEL notifications are a defence-in-depth fallback — if the push-hook
   // below ever misses (e.g. `notify` stripped by a user override), the PTY
@@ -56,8 +57,12 @@ function buildCodexLaunch(session: Session, mode: CommandMode = "new"): PtyLaunc
       parts.push("--model", session.model);
     }
 
-    if (approvalMode) {
-      parts.push("--approval-mode", approvalMode);
+    if (askForApproval) {
+      parts.push("--ask-for-approval", askForApproval);
+    }
+
+    if (sandbox) {
+      parts.push("--sandbox", sandbox);
     }
   }
 
