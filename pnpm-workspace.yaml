@@ -1,0 +1,13 @@
+packages:
+  - "."
+
+overrides:
+  picomatch: 4.0.4
+  rollup: 4.60.1
+
+onlyBuiltDependencies:
+  - esbuild
+
+# msw is an unused optional peer of @vitest/mocker; never run its postinstall build.
+ignoredBuiltDependencies:
+  - msw

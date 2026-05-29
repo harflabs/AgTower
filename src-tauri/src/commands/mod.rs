@@ -1,0 +1,11 @@
+pub(crate) mod appearance;
+pub(crate) mod discovery;
+pub(crate) mod engine_commands;
+pub(crate) mod haptics;
+pub(crate) mod power;
+pub(crate) mod repo;
+pub(crate) mod sound;
+pub(crate) mod terminal;
+pub(crate) mod tray;
+pub(crate) mod view_commands;
+pub(crate) mod window;

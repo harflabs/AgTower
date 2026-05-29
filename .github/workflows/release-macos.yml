@@ -1,0 +1,99 @@
+name: Release macOS
+
+on:
+  push:
+    tags:
+      - "v*"
+
+permissions:
+  contents: write
+
+concurrency:
+  group: release-macos
+  cancel-in-progress: false
+
+env:
+  CARGO_TERM_COLOR: always
+  RUST_BACKTRACE: 1
+
+jobs:
+  publish-macos:
+    name: Publish macOS (Apple Silicon)
+    runs-on: macos-latest
+    timeout-minutes: 30
+
+    steps:
+      - uses: actions/checkout@v6
+
+      - uses: pnpm/action-setup@v6
+
+      - uses: actions/setup-node@v6
+        with:
+          node-version: 22
+          cache: pnpm
+
+      - uses: dtolnay/rust-toolchain@stable
+        with:
+          targets: aarch64-apple-darwin
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          workspaces: src-tauri -> target
+
+      - name: Install dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Import Apple Developer ID certificate
+        env:
+          APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
+          APPLE_CERTIFICATE_PASSWORD: ${{ secrets.APPLE_CERTIFICATE_PASSWORD }}
+          KEYCHAIN_PASSWORD: ${{ secrets.KEYCHAIN_PASSWORD }}
+        run: |
+          echo "$APPLE_CERTIFICATE" | base64 --decode > certificate.p12
+          security create-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security default-keychain -s build.keychain
+          security unlock-keychain -p "$KEYCHAIN_PASSWORD" build.keychain
+          security set-keychain-settings -lut 21600 build.keychain
+          security import certificate.p12 -k build.keychain -P "$APPLE_CERTIFICATE_PASSWORD" -T /usr/bin/codesign
+          security set-key-partition-list -S apple-tool:,apple:,codesign: -s -k "$KEYCHAIN_PASSWORD" build.keychain
+          security list-keychains -d user -s build.keychain login.keychain-db
+          security find-identity -v -p codesigning build.keychain
+          rm -f certificate.p12
+
+      - name: Resolve signing identity
+        run: |
+          CERT_INFO=$(security find-identity -v -p codesigning build.keychain | grep 'Developer ID Application' | head -n 1 || true)
+          if [ -z "$CERT_INFO" ]; then
+            echo "Developer ID Application certificate not found in build.keychain" >&2
+            exit 1
+          fi
+
+          CERT_ID=$(echo "$CERT_INFO" | awk -F'"' '{print $2}')
+          echo "APPLE_SIGNING_IDENTITY=$CERT_ID" >> "$GITHUB_ENV"
+
+      - uses: tauri-apps/tauri-action@v0.6
+        id: tauri-build
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          APPLE_SIGNING_IDENTITY: ${{ env.APPLE_SIGNING_IDENTITY }}
+          APPLE_ID: ${{ secrets.APPLE_ID }}
+          APPLE_PASSWORD: ${{ secrets.APPLE_PASSWORD }}
+          APPLE_TEAM_ID: ${{ secrets.APPLE_TEAM_ID }}
+          TAURI_SIGNING_PRIVATE_KEY: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY }}
+          TAURI_SIGNING_PRIVATE_KEY_PASSWORD: ${{ secrets.TAURI_SIGNING_PRIVATE_KEY_PASSWORD }}
+        with:
+          tagName: ${{ github.ref_name }}
+          releaseName: AgTower ${{ github.ref_name }}
+          releaseBody: See the assets to download this version and install.
+          releaseDraft: true
+          prerelease: false
+          tauriScript: pnpm tauri
+          args: --target aarch64-apple-darwin
+
+      # tauri-action emits `<name>.app.tar.gz` + `<name>.app.tar.gz.sig` +
+      # `latest.json` into target/<triple>/release/bundle/macos/, and
+      # uploads them as release assets. The updater reads `latest.json`
+      # at /releases/latest/download/latest.json (stable URL across tags).
+      #
+      # `createUpdaterArtifacts: true` in tauri.conf.json + the signing
+      # env vars above are what make those artifacts appear.

@@ -1,0 +1,50 @@
+name: Bug report
+description: Report a problem with AgTower
+labels: ["bug"]
+body:
+  - type: markdown
+    attributes:
+      value: Thanks for filing a bug! Please search existing issues first.
+  - type: textarea
+    id: what-happened
+    attributes:
+      label: What happened?
+      description: A clear description of the bug and what you expected instead.
+    validations:
+      required: true
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      placeholder: |
+        1. ...
+        2. ...
+        3. ...
+    validations:
+      required: true
+  - type: input
+    id: version
+    attributes:
+      label: AgTower version
+      description: See AgTower → About.
+    validations:
+      required: true
+  - type: input
+    id: macos
+    attributes:
+      label: macOS version
+    validations:
+      required: true
+  - type: dropdown
+    id: provider
+    attributes:
+      label: Provider
+      options:
+        - Claude Code
+        - Codex
+        - Other / N/A
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs / screenshots
+      description: Any relevant terminal output, console errors, or screenshots.

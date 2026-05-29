@@ -1,0 +1,71 @@
+#!/usr/bin/env bash
+#
+# agtower-hook — tiny helper that agent CLIs (Claude Code via --settings,
+# Codex via -c notify=…) invoke on lifecycle events. Each invocation writes a
+# single JSON line to the AgTower control socket at $AGTOWER_SOCKET_PATH
+# identifying $AGTOWER_SESSION_ID.
+#
+# Usage:
+#   agtower-hook set-status <running|idle|needsAttention|closed>
+#   agtower-hook notify
+#
+# All lookups are environment-driven:
+#   AGTOWER_SESSION_ID   — UUID of the session this PTY belongs to
+#   AGTOWER_SOCKET_PATH  — absolute path to the Unix socket
+#
+# Hooks must not block the agent, so we exec-via-background the actual write
+# and exit quickly. Failures are swallowed: if the socket isn't reachable
+# (app quit mid-session), the agent continues unharmed.
+
+set -u
+
+if [[ -z "${AGTOWER_SOCKET_PATH:-}" || -z "${AGTOWER_SESSION_ID:-}" ]]; then
+    exit 0
+fi
+
+if [[ ! -S "$AGTOWER_SOCKET_PATH" ]]; then
+    exit 0
+fi
+
+action="${1:-}"
+shift || true
+
+send_line() {
+    local payload="$1"
+    # Prefer the absolute path to BSD `nc` first — AgTower's minimum macOS
+    # version is 13.0 and /usr/bin/nc is guaranteed to exist there with
+    # `-U` (Unix-socket) support. Falling back to PATH-resolved `nc` covers
+    # Linux, and `socat` handles the "user doesn't have nc on PATH" edge.
+    local tool
+    if [[ -x /usr/bin/nc ]]; then
+        tool=/usr/bin/nc
+    elif command -v nc >/dev/null 2>&1; then
+        tool="$(command -v nc)"
+    elif command -v socat >/dev/null 2>&1; then
+        printf '%s\n' "$payload" | socat - "UNIX-CONNECT:$AGTOWER_SOCKET_PATH" >/dev/null 2>&1 &
+        disown 2>/dev/null || true
+        return
+    else
+        # Nothing capable of speaking Unix-domain sockets. Bail silently so
+        # the agent isn't impacted; state tracking just degrades.
+        return
+    fi
+    printf '%s\n' "$payload" | "$tool" -U -w 1 "$AGTOWER_SOCKET_PATH" >/dev/null 2>&1 &
+    disown 2>/dev/null || true
+}
+
+case "$action" in
+    set-status)
+        status="${1:-}"
+        [[ -z "$status" ]] && exit 0
+        send_line "{\"action\":\"set-status\",\"sessionId\":\"$AGTOWER_SESSION_ID\",\"status\":\"$status\"}"
+        ;;
+    notify)
+        send_line "{\"action\":\"notify\",\"sessionId\":\"$AGTOWER_SESSION_ID\"}"
+        ;;
+    *)
+        exit 0
+        ;;
+esac
+
+exit 0

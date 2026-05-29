@@ -1,0 +1,1521 @@
+@import "tailwindcss";
+@import "tw-animate-css";
+@import "@fontsource-variable/inter";
+@import "@fontsource-variable/jetbrains-mono";
+
+/* Inlined from the `shadcn` package's dist/tailwind.css so the shadcn scaffolding CLI is
+   not a build dependency (it otherwise drags in a full express/MCP server tree). These
+   custom variants and the no-scrollbar utility back the vendored components in
+   src/components/ui. Regenerate with `pnpm dlx shadcn@latest` if it ever changes. */
+@theme inline {
+  @keyframes accordion-down {
+    from {
+      height: 0;
+    }
+    to {
+      height: var(
+        --radix-accordion-content-height,
+        var(--accordion-panel-height, auto)
+      );
+    }
+  }
+
+  @keyframes accordion-up {
+    from {
+      height: var(
+        --radix-accordion-content-height,
+        var(--accordion-panel-height, auto)
+      );
+    }
+    to {
+      height: 0;
+    }
+  }
+}
+
+@custom-variant data-open {
+  &:where([data-state="open"]),
+  &:where([data-open]:not([data-open="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-closed {
+  &:where([data-state="closed"]),
+  &:where([data-closed]:not([data-closed="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-checked {
+  &:where([data-state="checked"]),
+  &:where([data-checked]:not([data-checked="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-unchecked {
+  &:where([data-state="unchecked"]),
+  &:where([data-unchecked]:not([data-unchecked="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-selected {
+  &:where([data-selected="true"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-disabled {
+  &:where([data-disabled="true"]),
+  &:where([data-disabled]:not([data-disabled="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-active {
+  &:where([data-state="active"]),
+  &:where([data-active]:not([data-active="false"])) {
+    @slot;
+  }
+}
+
+@custom-variant data-horizontal {
+  &:where([data-orientation="horizontal"]) {
+    @slot;
+  }
+}
+
+@custom-variant data-vertical {
+  &:where([data-orientation="vertical"]) {
+    @slot;
+  }
+}
+
+@utility no-scrollbar {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+
+  &::-webkit-scrollbar {
+    display: none;
+  }
+}
+
+@custom-variant dark (&:is(.dark *));
+
+@keyframes pulse-dot {
+  0%,
+  100% {
+    opacity: 1;
+    transform: scale(1);
+  }
+  50% {
+    opacity: 0.4;
+    transform: scale(0.75);
+  }
+}
+
+@keyframes collapsible-down {
+  from {
+    height: 0;
+  }
+  to {
+    height: var(--radix-collapsible-content-height);
+  }
+}
+
+@keyframes collapsible-up {
+  from {
+    height: var(--radix-collapsible-content-height);
+  }
+  to {
+    height: 0;
+  }
+}
+
+/*
+ * ─── Corner-radius scale & concentricity ──────────────────────────────
+ *
+ * The radius tokens are spaced in 4 px increments above --radius-lg so
+ * that nested rounded-rects stay concentric:
+ *
+ *   inner_radius = outer_radius − padding
+ *
+ * With the 4 px step the mapping is automatic:
+ *   padding 4 px  (p-1)   → drop 1 level   (3xl → 2xl, 2xl → xl …)
+ *   padding 8 px  (p-2)   → drop 2 levels
+ *   padding 12 px (p-3)   → drop 3 levels
+ *   padding 16 px (p-4)   → drop 4 levels
+ *
+ * Scale:  sm(6) · md(8) · lg(10) · xl(14) · 2xl(18) · 3xl(22) · 4xl(26)
+ */
+
+@theme inline {
+    --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+    --animate-collapsible-down: collapsible-down 150ms ease-out;
+    --animate-collapsible-up: collapsible-up 150ms ease-out;
+    --font-sans: var(--font-sans-stack);
+    --font-mono: var(--font-mono-stack);
+    --radius-sm: calc(var(--radius) - 4px);
+    --radius-md: calc(var(--radius) - 2px);
+    --radius-lg: var(--radius);
+    --radius-xl: calc(var(--radius) + 4px);
+    --radius-2xl: calc(var(--radius) + 8px);
+    --radius-3xl: calc(var(--radius) + 12px);
+    --radius-4xl: calc(var(--radius) + 16px);
+    --color-background: var(--background);
+    --color-foreground: var(--foreground);
+    --color-surface: var(--surface);
+    --color-surface-foreground: var(--surface-foreground);
+    --color-card: var(--card);
+    --color-card-foreground: var(--card-foreground);
+    --color-inset: var(--inset);
+    --color-inset-foreground: var(--inset-foreground);
+    --color-popover: var(--popover);
+    --color-popover-foreground: var(--popover-foreground);
+    --color-primary: var(--primary);
+    --color-primary-foreground: var(--primary-foreground);
+    --color-secondary: var(--secondary);
+    --color-secondary-foreground: var(--secondary-foreground);
+    --color-muted: var(--muted);
+    --color-muted-foreground: var(--muted-foreground);
+    --color-accent: var(--accent);
+    --color-accent-foreground: var(--accent-foreground);
+    --color-interactive-hover: var(--interactive-hover);
+    --color-interactive-selected: var(--interactive-selected);
+    --color-interactive-selected-foreground: var(--interactive-selected-foreground);
+    --color-interactive-selected-border: var(--interactive-selected-border);
+    --color-interactive-focus-ring: var(--interactive-focus-ring);
+    --color-destructive: var(--destructive);
+    --color-destructive-foreground: var(--destructive-foreground);
+    --color-success: var(--success);
+    --color-success-foreground: var(--success-foreground);
+    --color-warning: var(--warning);
+    --color-warning-foreground: var(--warning-foreground);
+    --color-info: var(--info);
+    --color-info-foreground: var(--info-foreground);
+    --color-highlight: var(--highlight);
+    --color-highlight-foreground: var(--highlight-foreground);
+    --color-border: var(--border);
+    --color-input: var(--input);
+    --color-ring: var(--ring);
+    --text-2xs: 0.6875rem;
+    --text-2xs--line-height: 1rem;
+    --color-chart-1: var(--chart-1);
+    --color-chart-2: var(--chart-2);
+    --color-chart-3: var(--chart-3);
+    --color-chart-4: var(--chart-4);
+    --color-chart-5: var(--chart-5);
+    --color-sidebar: var(--sidebar);
+    --color-sidebar-foreground: var(--sidebar-foreground);
+    --color-sidebar-primary: var(--sidebar-primary);
+    --color-sidebar-primary-foreground: var(--sidebar-primary-foreground);
+    --color-sidebar-accent: var(--sidebar-accent);
+    --color-sidebar-accent-foreground: var(--sidebar-accent-foreground);
+    --color-sidebar-interactive-hover: var(--sidebar-interactive-hover);
+    --color-sidebar-interactive-selected: var(--sidebar-interactive-selected);
+    --color-sidebar-interactive-selected-foreground: var(--sidebar-interactive-selected-foreground);
+    --color-sidebar-interactive-selected-border: var(--sidebar-interactive-selected-border);
+    --color-sidebar-interactive-focus-ring: var(--sidebar-interactive-focus-ring);
+    --color-sidebar-border: var(--sidebar-border);
+    --color-sidebar-ring: var(--sidebar-ring);
+    --font-heading: var(--font-sans);
+}
+
+/* No transition on html — causes full document reflow on theme change */
+
+/* Promote pulse-dot animations to GPU compositor layer to avoid layout reflows */
+.animate-pulse-dot {
+  will-change: transform, opacity;
+}
+
+/*
+ * ── Elevation hierarchy ──
+ *
+ * Light:  inset(94.5) ← background(96.5) ← surface(98.5) ← card(100) = popover
+ *         Gray canvas with white elevated cards (Apple grouped-background pattern).
+ *         Differentiation via border/shadow, not bg alone.
+ *
+ * Dark:   inset(12) → background(14.5) → surface(18.5) → card(26) → popover(28)
+ *         Monotonically ascending lightness (M3 tonal surfaces pattern).
+ *         Shadows invisible in dark; bg color IS the depth cue.
+ */
+
+:root {
+  /* 6px base — matches macOS Big Sur+ control radius (buttons, popovers, sheets).
+     The concentric scale expands from here: sm(2) md(4) lg(6) xl(10) 2xl(14). */
+  --radius: 0.375rem;
+  --window-toolbar-height: 3rem;
+  --window-native-titlebar-height: var(--window-toolbar-height);
+  --window-traffic-light-x: 1rem;
+  --window-traffic-light-cluster-width: 3.125rem;
+  --window-titlebar-control-gap: 0.75rem;
+  --window-titlebar-safe-area: calc(
+    var(--window-traffic-light-x) + var(--window-traffic-light-cluster-width) +
+      var(--window-titlebar-control-gap)
+  );
+  /* macOS Big Sur+ window corner radius is ~10pt. Content placed flush against
+     the bottom edges (e.g. the sidebar footer) gets clipped by the rounded
+     corner unless we inset by at least this much. Zeroed in fullscreen below. */
+  --window-corner-safe-area: 0.625rem;
+  --window-toolbar-title-foreground: oklch(from var(--foreground) l c h / 0.92);
+  --window-toolbar-caption-foreground: oklch(from var(--foreground) l c h / 0.58);
+  --window-toolbar-meta-foreground: oklch(from var(--foreground) l c h / 0.58);
+  --window-toolbar-symbol-foreground: oklch(from var(--foreground) l c h / 0.74);
+  --window-toolbar-symbol-border: oklch(from var(--foreground) l c h / 0.08);
+  --window-toolbar-symbol-hover-bg: oklch(from var(--foreground) l c h / 0.055);
+  --window-toolbar-symbol-active-bg: oklch(from var(--foreground) l c h / 0.09);
+  --control-field-background: color-mix(in srgb, var(--popover) 72%, var(--background) 28%);
+  --control-field-border: oklch(from var(--foreground) l c h / 0.15);
+  --control-field-radius: 4px;
+  --control-field-placeholder: oklch(from var(--muted-foreground) l c h / 0.78);
+  --control-field-disabled-background: color-mix(
+    in srgb,
+    var(--input) 54%,
+    var(--background) 46%
+  );
+  --control-field-shadow:
+    inset 0 1px 1px rgba(0, 0, 0, 0.035),
+    inset 0 0 0 0.5px oklch(from var(--foreground) l c h / 0.03);
+  --native-panel-radius: 6px;
+  --native-row-radius: 4px;
+  --native-panel-background: color-mix(in srgb, var(--card) 72%, var(--background) 28%);
+  --native-inset-background: color-mix(in srgb, var(--background) 76%, var(--card) 24%);
+  --native-panel-shadow: none;
+  --native-popover-shadow:
+    0 18px 48px -30px rgba(0, 0, 0, 0.48),
+    0 6px 18px -16px rgba(0, 0, 0, 0.34);
+  --sidebar-search-background: oklch(from var(--background) l c h / 0.72);
+  --sidebar-search-border: oklch(from var(--foreground) l c h / 0.09);
+  --sidebar-search-placeholder: oklch(from var(--muted-foreground) l c h / 0.78);
+  --sidebar-section-label-foreground: oklch(from var(--foreground) l c h / 0.52);
+  /* System accent color. Defaults to macOS "default blue"; the Rust side
+     reads NSColor.controlAccentColor at startup + on focus return and
+     writes the live value here (useSystemAccentColor). Used by the
+     sidebar selection tint and focus ring on macOS so the UI follows
+     the user's System Settings → Appearance → Accent choice. */
+  --macos-accent: #007aff;
+  --font-sans-stack: "Inter Variable", sans-serif;
+  --font-mono-stack: "JetBrains Mono Variable", ui-monospace, monospace;
+  --background: oklch(0.965 0.001 265);
+  --foreground: oklch(0.145 0 0);
+  --surface: oklch(0.985 0.001 265);
+  --surface-foreground: oklch(0.145 0 0);
+  --card: oklch(1 0 0);
+  --card-foreground: oklch(0.145 0 0);
+  --inset: oklch(0.945 0.002 265);
+  --inset-foreground: oklch(0.145 0 0);
+  --popover: oklch(1 0 0);
+  --popover-foreground: oklch(0.145 0 0);
+  --primary: oklch(0.205 0 0);
+  --primary-foreground: oklch(0.985 0 0);
+  --secondary: oklch(0.97 0 0);
+  --secondary-foreground: oklch(0.205 0 0);
+  --muted: oklch(0.97 0 0);
+  --muted-foreground: oklch(0.52 0 0);
+  --accent: oklch(0.97 0 0);
+  --accent-foreground: oklch(0.205 0 0);
+  --interactive-hover: oklch(0.952 0.003 255);
+  --interactive-selected: oklch(0.918 0.007 252);
+  --interactive-selected-foreground: oklch(0.145 0 0);
+  --interactive-selected-border: oklch(0.84 0.01 252);
+  --interactive-focus-ring: oklch(0.67 0.035 245);
+  --destructive: oklch(0.55 0.245 27.325);
+  --destructive-foreground: oklch(0.985 0 0);
+  --success: oklch(0.52 0.16 145);
+  --success-foreground: oklch(0.985 0 0);
+  --warning: oklch(0.62 0.17 65);
+  --warning-foreground: oklch(0.16 0.06 65);
+  --info: oklch(0.55 0.18 295);
+  --info-foreground: oklch(0.985 0 0);
+  --highlight: oklch(0.88 0.15 85);
+  --highlight-foreground: oklch(0.16 0.02 85);
+  --border: oklch(0.922 0 0);
+  --input: oklch(0.922 0 0);
+  --ring: oklch(0.67 0.035 245);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  /* Sidebar defaults are solid (non-macOS has no vibrancy backdrop).
+     macOS override (below) swaps to transparent + translucent interactive
+     tints that work over NSVisualEffectView. */
+  --sidebar: oklch(0.985 0 0);
+  --sidebar-foreground: oklch(0.145 0 0);
+  --sidebar-primary: oklch(0.205 0 0);
+  --sidebar-primary-foreground: oklch(0.985 0 0);
+  --sidebar-accent: oklch(0.97 0 0);
+  --sidebar-accent-foreground: oklch(0.205 0 0);
+  --sidebar-interactive-hover: oklch(0.948 0.004 252);
+  --sidebar-interactive-selected: oklch(0.912 0.008 252);
+  --sidebar-interactive-selected-foreground: oklch(0.145 0 0);
+  --sidebar-interactive-selected-border: oklch(0.834 0.011 252);
+  --sidebar-interactive-focus-ring: oklch(0.67 0.035 245);
+  --sidebar-border: oklch(0.922 0 0);
+  --sidebar-ring: oklch(0.67 0.035 245);
+}
+
+html[data-platform="macos"] {
+  /* Apple HIG "Unified" toolbar: 52pt tall, traffic lights at y=19 (cluster
+     ~14pt tall) center at y=26 — same as `flex items-center` content center
+     (52/2 = 26). Matches Safari, Mail, Xcode, Finder. Single source of truth. */
+  --window-toolbar-height: 3.25rem;
+  --window-traffic-light-x: 1.25rem;
+  --window-traffic-light-cluster-width: 3.25rem;
+  --window-titlebar-control-gap: 0.75rem;
+  --window-toolbar-title-foreground: oklch(from var(--foreground) l c h / 0.88);
+  --window-toolbar-caption-foreground: oklch(from var(--foreground) l c h / 0.56);
+  --window-toolbar-meta-foreground: oklch(from var(--foreground) l c h / 0.56);
+  --window-toolbar-symbol-foreground: oklch(from var(--foreground) l c h / 0.72);
+  --window-toolbar-symbol-border: oklch(from var(--foreground) l c h / 0.1);
+  --window-toolbar-symbol-hover-bg: oklch(from var(--foreground) l c h / 0.065);
+  --window-toolbar-symbol-active-bg: oklch(from var(--foreground) l c h / 0.11);
+  --control-field-background: color-mix(in srgb, var(--popover) 68%, var(--background) 32%);
+  --control-field-border: oklch(from var(--foreground) l c h / 0.16);
+  --control-field-placeholder: oklch(from var(--muted-foreground) l c h / 0.74);
+  --sidebar-search-background: color-mix(in srgb, var(--background) 70%, transparent);
+  --sidebar-search-border: oklch(from var(--foreground) l c h / 0.11);
+  --sidebar-search-placeholder: oklch(from var(--muted-foreground) l c h / 0.74);
+  --sidebar-section-label-foreground: oklch(from var(--foreground) l c h / 0.48);
+  --primary: var(--macos-accent);
+  --primary-foreground: oklch(0.99 0 0);
+  --font-sans-stack:
+    "SF Pro Text",
+    "SF Pro Display",
+    -apple-system,
+    BlinkMacSystemFont,
+    "Helvetica Neue",
+    sans-serif;
+  --font-mono-stack:
+    "SF Mono",
+    ui-monospace,
+    Menlo,
+    Monaco,
+    "JetBrains Mono Variable",
+    monospace;
+
+  /* Sidebar is transparent in light mode so NSVisualEffectView shows through.
+     Dark mode gets its own source-list tint below; relying on raw dark
+     vibrancy made text and controls too low-contrast in real use. */
+  --sidebar: transparent;
+  --sidebar-interactive-hover: oklch(0.145 0 0 / 0.06);
+  --sidebar-interactive-selected: oklch(0.145 0 0 / 0.1);
+  --sidebar-interactive-selected-border: transparent;
+  --sidebar-border: oklch(0.145 0 0 / 0.12);
+}
+
+html[data-platform="macos"].dark {
+  /* Mail/Notes pattern: translucent dark tint over .sidebar vibrancy.
+     Vibrancy provides blur + saturation underneath; the 0.55 alpha pulls
+     visual lightness down to ~L=0.27 so source-list rows read clearly
+     while the material's character still shows through. */
+  --sidebar: oklch(0.18 0 0 / 0.55);
+  --sidebar-interactive-hover: oklch(1 0 0 / 0.10);
+  --sidebar-interactive-selected: oklch(1 0 0 / 0.18);
+  --sidebar-interactive-selected-border: transparent;
+  --sidebar-border: oklch(1 0 0 / 0.15);
+  --window-toolbar-title-foreground: oklch(from var(--foreground) l c h / 0.92);
+  --window-toolbar-caption-foreground: oklch(from var(--foreground) l c h / 0.62);
+  --window-toolbar-meta-foreground: oklch(from var(--foreground) l c h / 0.62);
+  --window-toolbar-symbol-foreground: oklch(from var(--foreground) l c h / 0.92);
+  --window-toolbar-symbol-border: oklch(1 0 0 / 0.14);
+  --window-toolbar-symbol-hover-bg: oklch(1 0 0 / 0.12);
+  --window-toolbar-symbol-active-bg: oklch(1 0 0 / 0.18);
+  --control-field-background: oklch(1 0 0 / 0.07);
+  --control-field-border: oklch(1 0 0 / 0.13);
+  --control-field-placeholder: oklch(from var(--muted-foreground) l c h / 0.82);
+  --control-field-disabled-background: oklch(1 0 0 / 0.045);
+  --control-field-shadow:
+    inset 0 1px 1px rgba(0, 0, 0, 0.16),
+    inset 0 0 0 0.5px oklch(1 0 0 / 0.035);
+  --sidebar-search-background: oklch(0.18 0 0 / 0.45);
+  --sidebar-search-border: oklch(1 0 0 / 0.14);
+  --sidebar-search-placeholder: oklch(from var(--foreground) l c h / 0.84);
+  --sidebar-section-label-foreground: oklch(from var(--foreground) l c h / 0.92);
+  --primary: color-mix(in srgb, var(--macos-accent) 88%, white 12%);
+  --primary-foreground: oklch(0.99 0 0);
+}
+
+/* ── Sidebar selection tracks the system accent color ──
+   Real NSOutlineView (Finder, Mail, Messages, Reminders) tints selected
+   rows with NSColor.selectedContentBackgroundColor — which derives from
+   the user's System Settings → Appearance → Accent. When the window
+   loses focus, AppKit swaps to unemphasizedSelectedContentBackgroundColor
+   (neutral gray). We mirror that here: accent-tinted selection + focus
+   ring when the window is active, neutral gray (existing vars) when
+   inactive. The alpha is tuned to blend over NSVisualEffectView vibrancy
+   without masking it — matches the Sonoma/Sequoia Messages look. */
+html[data-platform="macos"][data-window-active="true"] {
+  --sidebar-interactive-selected: color-mix(in srgb, var(--macos-accent) 22%, transparent);
+  --sidebar-interactive-focus-ring: var(--macos-accent);
+}
+html[data-platform="macos"][data-window-active="true"].dark {
+  --sidebar-interactive-selected: color-mix(in srgb, var(--macos-accent) 52%, transparent);
+}
+html[data-platform="macos"][data-window-active="false"] {
+  --window-toolbar-title-foreground: oklch(from var(--foreground) l c h / 0.62);
+  --window-toolbar-caption-foreground: oklch(from var(--foreground) l c h / 0.42);
+  --window-toolbar-meta-foreground: oklch(from var(--foreground) l c h / 0.42);
+  --window-toolbar-symbol-foreground: oklch(from var(--foreground) l c h / 0.46);
+  --sidebar-section-label-foreground: oklch(from var(--foreground) l c h / 0.56);
+}
+html[data-platform="macos"][data-window-active="false"].dark {
+  --window-toolbar-title-foreground: oklch(from var(--foreground) l c h / 0.74);
+  --window-toolbar-caption-foreground: oklch(from var(--foreground) l c h / 0.64);
+  --window-toolbar-meta-foreground: oklch(from var(--foreground) l c h / 0.64);
+  --window-toolbar-symbol-foreground: oklch(from var(--foreground) l c h / 0.72);
+  --sidebar-section-label-foreground: oklch(from var(--foreground) l c h / 0.78);
+}
+
+/* ── Sidebar scroll container: native-feeling scroll ──
+   `scrollbar-gutter: stable` reserves space for the overlay scrollbar so
+   rows don't shift laterally when WebKit flashes it in/out on scroll.
+   `overscroll-behavior: contain` stops scroll-chaining to the window
+   (Tauri rubber-bands the whole webview otherwise) while letting the
+   sidebar's own container elastic-bounce at its boundaries.
+   Targets the shadcn SidebarContent slot directly. */
+[data-slot="sidebar-content"] {
+  scrollbar-gutter: stable;
+  overscroll-behavior: contain;
+}
+
+/* ── Sticky workspace headers (Messages/Settings pattern) ──
+   When a workspace has many expanded sessions, scrolling keeps the
+   header visible until the next workspace pushes it out. Uses
+   backdrop-filter over the NSVisualEffectView vibrancy (macOS) / sidebar
+   bg (elsewhere) to frost the scrolling content beneath — matches the
+   native "source list section" effect. */
+.sidebar-workspace-header-sticky {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  background: var(--sidebar);
+  backdrop-filter: saturate(180%) blur(10px);
+  -webkit-backdrop-filter: saturate(180%) blur(10px);
+}
+
+/* ── Fullscreen on macOS ──
+   macOS fullscreen removes the traffic lights and changes the titlebar
+   geometry. Adapt: shrink the left-side clearance, restore a solid sidebar
+   background (no vibrancy behind the window in fullscreen), and make the body
+   opaque so the webview doesn't show the dark fullscreen backdrop through our
+   transparent window. */
+html[data-platform="macos"][data-fullscreen="true"] {
+  --window-native-titlebar-height: var(--window-toolbar-height);
+  --window-titlebar-safe-area: 0.75rem;
+  --window-corner-safe-area: 0px;
+  --sidebar: oklch(0.985 0 0);
+}
+html[data-platform="macos"][data-fullscreen="true"].dark {
+  --sidebar: oklch(0.235 0 0);
+}
+html[data-platform="macos"][data-fullscreen="true"] body {
+  background: var(--background);
+}
+
+/* ── Native macOS chrome: dim toolbar buttons when window loses focus ──
+   Mirrors NSToolbar behavior. Traffic lights dim natively via AppKit;
+   we handle our own icon buttons and section headers here. */
+html[data-window-active="false"] .window-toolbar-row [data-slot="button"],
+html[data-window-active="false"] .window-toolbar-row [data-slot="icon-button"] {
+  opacity: 0.48;
+  transition: opacity 180ms ease;
+}
+html[data-window-active="true"] .window-toolbar-row [data-slot="button"],
+html[data-window-active="true"] .window-toolbar-row [data-slot="icon-button"] {
+  transition: opacity 120ms ease;
+}
+html[data-platform="macos"][data-window-active="false"] .sidebar-header-control-group,
+html[data-platform="macos"][data-window-active="false"] [data-slot="sidebar-header"] [data-slot="button"],
+html[data-platform="macos"][data-window-active="false"] [data-sidebar-section-controls-visible="true"] {
+  opacity: 0.55;
+  transition: opacity 180ms ease;
+}
+html[data-platform="macos"][data-window-active="false"].dark .sidebar-header-control-group,
+html[data-platform="macos"][data-window-active="false"].dark [data-slot="sidebar-header"] [data-slot="button"],
+html[data-platform="macos"][data-window-active="false"].dark [data-sidebar-section-controls-visible="true"] {
+  opacity: 0.76;
+}
+
+/* Dark theme — neutral tooling palette (Apple systemGray6 / VS Code Dark Modern). */
+.dark {
+  --background: oklch(0.205 0 0);
+  --foreground: oklch(0.965 0 0);
+  --surface: oklch(0.235 0 0);
+  --surface-foreground: oklch(0.965 0 0);
+  --card: oklch(0.255 0 0);
+  --card-foreground: oklch(0.965 0 0);
+  --inset: oklch(0.165 0 0);
+  --inset-foreground: oklch(0.965 0 0);
+  --popover: oklch(0.280 0 0);
+  --popover-foreground: oklch(0.965 0 0);
+  --primary: oklch(0.94 0 0);
+  --primary-foreground: oklch(0.205 0 0);
+  --secondary: oklch(0.275 0 0);
+  --secondary-foreground: oklch(0.965 0 0);
+  --muted: oklch(0.275 0 0);
+  --muted-foreground: oklch(0.730 0 0);
+  --accent: oklch(0.275 0 0);
+  --accent-foreground: oklch(0.965 0 0);
+  --interactive-hover: oklch(1 0 0 / 0.05);
+  --interactive-selected: oklch(1 0 0 / 0.10);
+  --interactive-selected-foreground: oklch(0.985 0 0);
+  --interactive-selected-border: oklch(1 0 0 / 0.16);
+  --interactive-focus-ring: oklch(0.74 0.04 245);
+  --destructive: oklch(0.66 0.20 22);
+  --destructive-foreground: oklch(0.16 0.04 22);
+  --success: oklch(0.62 0.16 145);
+  --success-foreground: oklch(0.16 0.04 145);
+  --warning: oklch(0.74 0.16 65);
+  --warning-foreground: oklch(0.16 0.06 65);
+  --info: oklch(0.70 0.10 240);
+  --info-foreground: oklch(0.16 0.02 240);
+  --highlight: oklch(0.66 0.18 85);
+  --highlight-foreground: oklch(0.16 0.04 85);
+  --border: oklch(1 0 0 / 0.14);
+  --input: oklch(1 0 0 / 0.06);
+  --control-field-background: oklch(1 0 0 / 0.07);
+  --control-field-border: oklch(1 0 0 / 0.13);
+  --control-field-placeholder: oklch(from var(--muted-foreground) l c h / 0.88);
+  --control-field-disabled-background: oklch(1 0 0 / 0.045);
+  --control-field-shadow:
+    inset 0 1px 1px rgba(0, 0, 0, 0.18),
+    inset 0 0 0 0.5px oklch(1 0 0 / 0.035);
+  --ring: oklch(0.66 0.04 245);
+  --chart-1: oklch(0.87 0 0);
+  --chart-2: oklch(0.556 0 0);
+  --chart-3: oklch(0.439 0 0);
+  --chart-4: oklch(0.371 0 0);
+  --chart-5: oklch(0.269 0 0);
+  --sidebar: oklch(0.235 0 0);
+  --sidebar-foreground: oklch(0.965 0 0);
+  --sidebar-primary: oklch(0.72 0.05 235);
+  --sidebar-primary-foreground: oklch(0.16 0 0);
+  --sidebar-accent: oklch(0.275 0 0);
+  --sidebar-accent-foreground: oklch(0.965 0 0);
+  --sidebar-interactive-hover: oklch(1 0 0 / 0.06);
+  --sidebar-interactive-selected: oklch(1 0 0 / 0.13);
+  --sidebar-interactive-selected-foreground: oklch(0.985 0 0);
+  --sidebar-interactive-selected-border: transparent;
+  --sidebar-interactive-focus-ring: oklch(0.74 0.04 245);
+  --sidebar-border: oklch(1 0 0 / 0.14);
+  --sidebar-ring: oklch(0.66 0.04 245);
+}
+
+@layer base {
+  * {
+    @apply border-border outline-ring/50;
+  }
+  html,
+  body {
+    overscroll-behavior: none;
+    overflow: hidden;
+  }
+  body {
+    @apply bg-background text-foreground;
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  /* macOS: let NSVisualEffectView show through the transparent window.
+     The sidebar has no bg; main content (.SidebarInset) keeps bg-background. */
+  html[data-platform="macos"] body {
+    background: transparent;
+  }
+
+  [data-window-drag-surface],
+  [data-drag-surface] {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  [data-window-drag-surface] input,
+  [data-window-drag-surface] textarea,
+  [data-window-drag-surface] [contenteditable="true"],
+  [data-window-drag-surface] [contenteditable="plaintext-only"] {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+  html {
+    @apply font-sans;
+  }
+}
+
+/* ── Information hierarchy utilities ── */
+@layer utilities {
+  .selection-chrome,
+  .selection-chrome *,
+  [data-selection="chrome"],
+  [data-selection="chrome"] * {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+
+  .selection-chrome :where(
+      input,
+      textarea,
+      select,
+      [contenteditable="true"],
+      [contenteditable="plaintext-only"],
+      [role="textbox"]
+    ),
+  [data-selection="chrome"] :where(
+      input,
+      textarea,
+      select,
+      [contenteditable="true"],
+      [contenteditable="plaintext-only"],
+      [role="textbox"]
+    ) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  :where(
+      input,
+      textarea,
+      select,
+      [contenteditable=""],
+      [contenteditable="true"],
+      [contenteditable="plaintext-only"],
+      [role="textbox"],
+      [data-allow-native-context-menu],
+      [data-allow-native-select-all],
+      .terminal-container,
+      .terminal-container *,
+      [data-selection="content"],
+      [data-selection="content"] *,
+      [data-selectable],
+      [data-selectable] *,
+      [data-select-all-scope],
+      [data-select-all-scope] *
+    ) {
+    -webkit-user-select: text;
+    user-select: text;
+  }
+
+  :where(
+      button,
+      a[href],
+      [role="button"],
+      [role="menuitem"],
+      [role="option"],
+      [data-slot="button"],
+      [data-slot="icon-button"],
+      [data-selection="content"] button,
+      [data-selection="content"] a[href],
+      [data-selection="content"] [role="button"],
+      [data-selection="content"] [role="menuitem"],
+      [data-selection="content"] [role="option"],
+      [data-select-all-scope] button,
+      [data-select-all-scope] a[href],
+      [data-select-all-scope] [role="button"],
+      [data-select-all-scope] [role="menuitem"],
+      [data-select-all-scope] [role="option"]
+    ) {
+    -webkit-user-select: none;
+    user-select: none;
+  }
+  .window-toolbar-row {
+    /* Intentionally empty — AppKit now centers the traffic lights via the
+       invisible NSToolbar, and the web toolbar aligns itself with flex. */
+  }
+
+  .window-toolbar-title {
+    @apply truncate select-none text-[13px] font-medium leading-none;
+    color: var(--window-toolbar-title-foreground);
+    transition: color 120ms ease, opacity 120ms ease;
+  }
+
+  .window-toolbar-caption {
+    @apply select-none text-[13px] font-medium leading-none tabular-nums;
+    color: var(--window-toolbar-caption-foreground);
+    transition: color 120ms ease, opacity 120ms ease;
+  }
+
+  .window-toolbar-chip {
+    @apply inline-flex h-7 select-none items-center gap-1.5 rounded-md border border-transparent bg-transparent px-2 text-[12px] font-medium leading-none;
+    color: var(--window-toolbar-meta-foreground);
+    transition: color 120ms ease, opacity 120ms ease;
+  }
+
+  .window-toolbar-control {
+    @apply h-7 select-none rounded-md border-transparent bg-transparent px-2 text-[12px] font-medium leading-none shadow-none;
+    color: var(--window-toolbar-symbol-foreground);
+  }
+
+  .window-toolbar-icon-control {
+    @apply size-7 select-none rounded-md border bg-transparent p-0 shadow-none;
+    color: var(--window-toolbar-symbol-foreground);
+    border-color: var(--window-toolbar-symbol-border);
+  }
+
+  .sidebar-header-control-group {
+    @apply inline-flex items-center gap-0.5;
+  }
+
+  .sidebar-header-control-button {
+    @apply rounded-md border border-transparent bg-transparent shadow-none;
+    color: var(--window-toolbar-symbol-foreground);
+  }
+
+  .sidebar-section-control-strip .sidebar-header-control-button {
+    color: var(--sidebar-section-label-foreground);
+  }
+
+  .sidebar-footer-control {
+    color: oklch(from var(--sidebar-foreground) l c h / 0.94);
+  }
+
+  .sidebar-footer-control-active {
+    color: var(--sidebar-interactive-selected-foreground);
+    background: var(--sidebar-interactive-selected);
+    box-shadow: inset 0 0 0 1px var(--sidebar-border);
+  }
+
+  .sidebar-section-control-strip .sidebar-header-control-button.text-foreground {
+    color: var(--foreground);
+  }
+
+  .window-toolbar-danger-control {
+    @apply h-7 select-none rounded-md border-0 bg-transparent px-2 text-[12px] font-medium leading-none text-destructive shadow-none hover:bg-destructive/10;
+  }
+
+  .window-toolbar-meta {
+    @apply truncate select-none text-[12px] font-medium leading-none;
+    color: var(--window-toolbar-meta-foreground);
+    transition: color 120ms ease, opacity 120ms ease;
+  }
+
+  .window-toolbar-meta-separator {
+    @apply size-1 rounded-full bg-muted-foreground/40;
+  }
+
+  .text-primary-info {
+    @apply text-[13px] font-medium text-foreground;
+  }
+  .text-secondary-info {
+    @apply text-[11px] text-foreground/72;
+  }
+  .text-tertiary-info {
+    @apply text-[10px] text-muted-foreground/70;
+  }
+  .text-ui-label {
+    @apply text-2xs font-semibold uppercase tracking-[0.12em] text-muted-foreground;
+  }
+  .control-transition-native {
+    @apply transition-[background-color,border-color,color,box-shadow,opacity,transform] duration-100 ease-out;
+  }
+  .native-panel {
+    @apply overflow-hidden border border-border/60;
+    border-radius: var(--native-panel-radius);
+    background: var(--native-panel-background);
+    box-shadow: var(--native-panel-shadow);
+  }
+  .native-inset-panel {
+    @apply overflow-hidden border border-border/70;
+    border-radius: var(--native-panel-radius);
+    background: var(--native-inset-background);
+    box-shadow: var(--native-panel-shadow);
+  }
+  .native-panel-header {
+    @apply border-b border-border/55 px-4 py-3;
+  }
+  .native-panel-content {
+    @apply space-y-0 px-4 py-1.5;
+  }
+  .native-preference-row {
+    @apply flex items-center justify-between gap-4 border-b border-border/45 py-2.5 last:border-b-0;
+  }
+  .native-preference-row-start {
+    @apply flex items-start justify-between gap-4 border-b border-border/45 py-3 last:border-b-0;
+  }
+  .native-preference-row :where(p),
+  .native-preference-row-start :where(p),
+  .native-danger-row :where(p) {
+    font-size: 0.8125rem;
+    line-height: 1.25rem;
+    color: var(--muted-foreground);
+  }
+  .native-preference-control {
+    @apply w-full min-w-0 sm:w-[20rem] sm:max-w-[50%];
+  }
+  .native-danger-row {
+    @apply flex items-center justify-between gap-4 border-b border-destructive/15 py-3 last:border-b-0;
+  }
+  .native-badge-subtle {
+    @apply rounded-md border border-border/60 bg-background/78 px-1.5 py-0.5 text-[10px] font-medium text-muted-foreground;
+  }
+  .native-text-field {
+    border: 1px solid var(--control-field-border);
+    border-radius: var(--control-field-radius);
+    background: var(--control-field-background);
+    box-shadow: var(--control-field-shadow);
+    color: var(--foreground);
+    color-scheme: light dark;
+  }
+  .native-text-field::placeholder {
+    color: var(--control-field-placeholder);
+    opacity: 1;
+  }
+  .native-text-field:disabled {
+    background: var(--control-field-disabled-background);
+  }
+  .native-text-field[type="number"] {
+    font-variant-numeric: tabular-nums;
+  }
+  .native-text-field[type="number"]::-webkit-inner-spin-button,
+  .native-text-field[type="number"]::-webkit-outer-spin-button {
+    margin: 0;
+    -webkit-appearance: none;
+  }
+  .native-text-field[type="search"] {
+    -webkit-appearance: textfield;
+    appearance: textfield;
+    border-radius: var(--control-field-radius);
+  }
+  .native-text-field[type="search"]::-webkit-search-decoration,
+  .native-text-field[type="search"]::-webkit-search-cancel-button {
+    -webkit-appearance: none;
+  }
+  .focus-ring-default {
+    @apply focus-visible:outline-none focus-visible:border-ring/70 focus-visible:ring-1 focus-visible:ring-ring/35;
+  }
+  .focus-ring-default-inset {
+    @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-ring/28 focus-visible:ring-inset;
+  }
+  .focus-ring-sidebar {
+    @apply focus-visible:outline-none focus-visible:border-transparent focus-visible:bg-sidebar-interactive-hover focus-visible:text-sidebar-foreground;
+  }
+  .focus-ring-sidebar-inset {
+    @apply focus-visible:outline-none focus-visible:bg-sidebar-interactive-hover focus-visible:text-sidebar-foreground;
+  }
+  .focus-ring-destructive {
+    @apply aria-invalid:border-destructive aria-invalid:ring-1 aria-invalid:ring-destructive/24 dark:aria-invalid:ring-destructive/36;
+  }
+  .native-inline-control {
+    @apply rounded-md select-none transition-[background-color,border-color,color,box-shadow,opacity,transform] duration-100 ease-out hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:border-ring/70 focus-visible:ring-1 focus-visible:ring-ring/35;
+  }
+  .native-disclosure-control {
+    @apply rounded-md select-none transition-[background-color,border-color,color,box-shadow,opacity,transform] duration-100 ease-out hover:bg-muted/55 hover:text-foreground focus-visible:outline-none focus-visible:border-ring/70 focus-visible:ring-1 focus-visible:ring-ring/35;
+  }
+  .window-toolbar-symbol-button {
+    @apply rounded-md border border-transparent bg-transparent shadow-none;
+    color: var(--window-toolbar-symbol-foreground);
+  }
+  .window-toolbar-title-button {
+    @apply cursor-pointer truncate text-left font-medium focus-visible:outline-none focus-visible:border-ring/80 focus-visible:ring-2 focus-visible:ring-ring/24;
+    color: var(--window-toolbar-title-foreground);
+    transition:
+      background-color 100ms ease-out,
+      border-color 100ms ease-out,
+      color 100ms ease-out,
+      box-shadow 100ms ease-out,
+      opacity 100ms ease-out,
+      transform 100ms ease-out;
+  }
+  .sidebar-search-field {
+    transition:
+      background-color 100ms ease-out,
+      border-color 100ms ease-out,
+      color 100ms ease-out,
+      box-shadow 100ms ease-out,
+      opacity 100ms ease-out,
+      transform 100ms ease-out;
+  }
+  .interactive-base {
+    @apply border border-transparent;
+  }
+  .interactive-surface-default {
+    @apply hover:bg-interactive-hover hover:text-foreground hover:[&_svg]:text-foreground;
+  }
+  .interactive-surface-sidebar {
+    @apply hover:bg-sidebar-interactive-hover hover:text-sidebar-foreground hover:[&_svg]:text-sidebar-foreground;
+  }
+  .interactive-focus-visible-default {
+    @apply focus-visible:outline-none focus-visible:ring-1 focus-visible:ring-inset focus-visible:ring-interactive-focus-ring/32 focus-visible:border-interactive-selected-border;
+  }
+  .interactive-focus-visible-sidebar {
+    @apply focus-visible:outline-none focus-visible:bg-sidebar-interactive-hover focus-visible:text-sidebar-foreground focus-visible:border-transparent;
+  }
+  .interactive-selected-default {
+    @apply bg-interactive-selected text-interactive-selected-foreground border-interactive-selected-border [&_svg]:text-interactive-selected-foreground;
+  }
+  .interactive-selected-sidebar {
+    @apply bg-sidebar-interactive-selected text-sidebar-interactive-selected-foreground border-transparent [&_svg]:text-sidebar-interactive-selected-foreground;
+  }
+  .interactive-focused-default {
+    @apply bg-interactive-selected text-interactive-selected-foreground border-interactive-selected-border ring-1 ring-inset ring-interactive-focus-ring/35 [&_svg]:text-interactive-selected-foreground;
+  }
+  .interactive-focused-sidebar {
+    @apply bg-sidebar-interactive-hover text-sidebar-foreground border-transparent [&_svg]:text-sidebar-foreground;
+  }
+  .interactive-roving-focus-default {
+    @apply focus:bg-interactive-selected focus:text-interactive-selected-foreground focus:border-interactive-selected-border focus:[&_svg]:text-interactive-selected-foreground;
+  }
+  .interactive-data-selected-default {
+    @apply data-selected:bg-interactive-selected data-selected:text-interactive-selected-foreground data-selected:border-interactive-selected-border data-selected:[&_svg]:text-interactive-selected-foreground;
+  }
+  .interactive-data-open-default {
+    @apply data-open:bg-interactive-selected data-open:text-interactive-selected-foreground data-open:border-interactive-selected-border data-open:[&_svg]:text-interactive-selected-foreground;
+  }
+  .interactive-data-active-sidebar {
+    @apply data-active:bg-sidebar-interactive-selected data-active:text-sidebar-interactive-selected-foreground data-active:border-transparent data-active:[&_svg]:text-sidebar-interactive-selected-foreground;
+  }
+  .interactive-data-open-sidebar {
+    @apply data-open:bg-sidebar-interactive-selected data-open:text-sidebar-interactive-selected-foreground data-open:border-transparent data-open:[&_svg]:text-sidebar-interactive-selected-foreground;
+  }
+  .interactive-aria-selected-sidebar {
+    @apply aria-selected:bg-sidebar-interactive-selected aria-selected:text-sidebar-interactive-selected-foreground aria-selected:border-transparent aria-selected:[&_svg]:text-sidebar-interactive-selected-foreground;
+  }
+}
+
+html[data-platform="macos"] .window-toolbar-symbol-button:hover,
+html[data-platform="macos"] .window-toolbar-symbol-button:focus-visible,
+html[data-platform="macos"] .window-toolbar-symbol-button[aria-expanded="true"],
+html[data-platform="macos"] .sidebar-header-control-button:hover,
+html[data-platform="macos"] .sidebar-header-control-button:focus-visible,
+html[data-platform="macos"] .sidebar-header-control-button[aria-expanded="true"] {
+  background: var(--window-toolbar-symbol-hover-bg);
+  color: var(--foreground);
+}
+
+html[data-platform="macos"] .window-toolbar-symbol-button:active,
+html[data-platform="macos"] .sidebar-header-control-button:active {
+  background: var(--window-toolbar-symbol-active-bg);
+}
+
+html[data-platform="macos"] .window-toolbar-title-button:hover,
+html[data-platform="macos"] .window-toolbar-title-button:focus-visible {
+  background: var(--window-toolbar-symbol-hover-bg);
+}
+
+html[data-platform="macos"] .window-toolbar-title-button:active {
+  background: var(--window-toolbar-symbol-active-bg);
+}
+
+html[data-platform="macos"] .sidebar-search-field {
+  border-color: var(--sidebar-search-border);
+  background: var(--sidebar-search-background);
+  box-shadow:
+    inset 0 1px 1px rgba(0, 0, 0, 0.055),
+    inset 0 0 0 0.5px oklch(from var(--foreground) l c h / 0.025);
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+}
+
+html[data-platform="macos"] .sidebar-search-field:focus,
+html[data-platform="macos"] .sidebar-search-field:focus-visible {
+  background: var(--sidebar-search-background);
+  box-shadow:
+    inset 0 1px 1px rgba(0, 0, 0, 0.055),
+    inset 0 0 0 0.5px oklch(from var(--foreground) l c h / 0.025),
+    0 0 0 1px oklch(from var(--ring) l c h / 0.35);
+}
+
+html[data-platform="macos"] .sidebar-inline-field {
+  border-color: var(--sidebar-search-border);
+  background: var(--sidebar-search-background);
+  box-shadow:
+    inset 0 1px 1px rgba(0, 0, 0, 0.05),
+    inset 0 0 0 0.5px oklch(from var(--foreground) l c h / 0.025);
+}
+
+.sidebar-drag-preview {
+  border: 1px solid oklch(from var(--foreground) l c h / 0.12);
+  border-radius: var(--radius-md);
+  background: color-mix(in srgb, var(--sidebar) 84%, var(--foreground) 16%);
+  box-shadow: 0 8px 20px -16px rgba(0, 0, 0, 0.66);
+  opacity: 0.96;
+}
+
+html[data-platform="macos"] .sidebar-drag-preview {
+  backdrop-filter: saturate(180%) blur(18px);
+  -webkit-backdrop-filter: saturate(180%) blur(18px);
+}
+
+html[data-platform="macos"] .sidebar-search-field::placeholder {
+  color: var(--sidebar-search-placeholder);
+}
+
+html[data-platform="macos"][data-window-active="false"] .sidebar-search-field {
+  opacity: 0.74;
+}
+html[data-platform="macos"][data-window-active="false"].dark .sidebar-search-field {
+  opacity: 0.88;
+}
+
+html[data-platform="macos"] [data-sidebar-section-label] {
+  color: var(--sidebar-section-label-foreground);
+  transition: color 120ms ease, opacity 120ms ease;
+}
+
+/* Scrollbars:
+ *   - macOS: let WebKit render the native overlay scrollbar (auto-hide, thin, system-colored)
+ *     by NOT styling ::-webkit-scrollbar. Any ::-webkit-scrollbar rule opts out of overlay behavior.
+ *   - non-macOS: thin custom scrollbar since there's no OS overlay equivalent. */
+html[data-platform="default"] ::-webkit-scrollbar {
+  width: 6px;
+  height: 6px;
+}
+html[data-platform="default"] ::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-platform="default"] ::-webkit-scrollbar-thumb {
+  background: oklch(from var(--muted-foreground) l c h / 0.3);
+  border-radius: 3px;
+}
+html[data-platform="default"] ::-webkit-scrollbar-thumb:hover {
+  background: oklch(from var(--muted-foreground) l c h / 0.5);
+}
+html[data-platform="default"] ::-webkit-scrollbar-corner {
+  background: transparent;
+}
+
+.onboarding-canvas {
+  position: relative;
+  background: var(--background);
+}
+
+.dark .onboarding-canvas {
+  background: var(--background);
+}
+
+.setup-assistant-panel {
+  box-shadow: 0 1px 2px oklch(from var(--foreground) l c h / 0.05);
+}
+
+.setup-welcome-hero {
+  position: relative;
+  z-index: 0;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  align-items: center;
+  gap: 1rem;
+  width: 100%;
+  max-width: none;
+  min-height: 0;
+  justify-content: center;
+  overflow: visible;
+  padding: 0;
+}
+
+.setup-welcome-app-icon-shell {
+  position: relative;
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 100%;
+  height: 100%;
+  overflow: visible;
+  border-radius: 22.5%;
+  box-shadow: 0 2px 8px oklch(from var(--foreground) l c h / 0.08);
+}
+
+.setup-welcome-app-icon-image {
+  display: block;
+  position: relative;
+  z-index: 1;
+  width: 100%;
+  height: 100%;
+  object-fit: contain;
+  opacity: 1;
+  user-select: none;
+  -webkit-user-drag: none;
+}
+
+.setup-welcome-stage-wrap {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  align-items: stretch;
+  justify-content: center;
+  z-index: 10;
+  width: 100%;
+  min-height: 0;
+  margin-inline: auto;
+}
+
+.setup-welcome-stage-shell {
+  position: relative;
+  display: flex;
+  flex: 1 1 auto;
+  min-height: 21rem;
+  width: 100%;
+}
+
+.setup-welcome-stage {
+  position: relative;
+  z-index: 1;
+  display: flex;
+  flex: 1 1 auto;
+  flex-direction: column;
+  min-height: 0;
+  width: 100%;
+  overflow: hidden;
+  border: 1px solid var(--border);
+  border-radius: 0.625rem;
+  background: var(--card);
+  box-shadow: 0 1px 2px oklch(from var(--foreground) l c h / 0.04);
+}
+
+.setup-welcome-stage::before {
+  display: none;
+}
+
+.setup-welcome-stage-bar {
+  position: relative;
+  z-index: 1;
+  display: grid;
+  grid-template-columns: 1fr auto 1fr;
+  align-items: center;
+  gap: 0.875rem;
+  border-bottom: 1px solid oklch(from var(--border) l c h / 0.56);
+  padding: 0.625rem 0.875rem;
+  background: oklch(from var(--background) l c h / 0.48);
+}
+
+.setup-welcome-stage-body {
+  position: relative;
+  z-index: 1;
+  align-content: stretch;
+  align-items: stretch;
+  min-height: 0;
+}
+
+.setup-welcome-column--running {
+  border-color: oklch(from var(--info) l c h / 0.2);
+}
+
+.setup-welcome-column--attention {
+  border-color: oklch(from var(--warning) l c h / 0.24);
+}
+
+.setup-welcome-column--idle {
+  border-color: oklch(from var(--foreground) l c h / 0.12);
+}
+
+.provider-mask-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  width: 1em;
+  height: 1em;
+  background-color: currentColor;
+  -webkit-mask-position: center;
+  mask-position: center;
+  -webkit-mask-repeat: no-repeat;
+  mask-repeat: no-repeat;
+  -webkit-mask-size: contain;
+  mask-size: contain;
+}
+
+.setup-welcome-provider-mark {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  width: 0.95rem;
+  height: 0.95rem;
+  flex: 0 0 auto;
+}
+
+.setup-welcome-provider-mark-image {
+  display: block;
+  width: 100%;
+  height: 100%;
+  color: oklch(from var(--foreground) l c h / 0.8);
+}
+
+.setup-welcome-actions {
+  position: relative;
+  z-index: 10;
+  display: flex;
+  width: 100%;
+  flex-direction: column;
+  gap: 0.75rem;
+  align-items: center;
+  justify-content: center;
+  margin-top: auto;
+  padding-top: 0.5rem;
+}
+
+@media (min-width: 1024px) {
+  .setup-welcome-actions {
+    flex-direction: row;
+  }
+}
+
+@media (min-width: 520px) {
+  .setup-welcome-stage-body {
+    grid-auto-rows: minmax(0, 1fr);
+  }
+}
+
+@media (max-width: 1023px) {
+  .setup-welcome-stage-wrap {
+    min-height: 0;
+  }
+
+  .setup-welcome-stage-shell {
+    width: 100%;
+  }
+
+  .setup-welcome-actions {
+    align-items: center;
+    margin-top: 0.25rem;
+  }
+
+  .setup-welcome-actions > * {
+    width: auto;
+    max-width: 100%;
+  }
+
+  .setup-welcome-actions button {
+    justify-content: center;
+  }
+}
+
+@media (max-width: 640px) {
+  .setup-welcome-stage-bar {
+    padding: 0.75rem 0.875rem;
+  }
+}
+
+@media (max-width: 720px) {
+  .native-preference-row,
+  .native-preference-row-start,
+  .native-danger-row {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.625rem;
+  }
+
+  .native-preference-control {
+    width: 100%;
+    max-width: none;
+  }
+}
+
+@layer components {
+  .command-palette-overlay {
+    @apply fixed inset-0 z-50 bg-black/8;
+  }
+
+  .command-palette-shell {
+    @apply fixed top-[17%] left-1/2 z-50 -translate-x-1/2 overflow-visible outline-none;
+    width: clamp(34rem, 46vw, 43rem);
+    max-width: calc(100vw - 2.5rem);
+    max-height: min(58vh, calc(100vh - 8rem));
+  }
+
+  .command-palette-root {
+    @apply flex size-full flex-col overflow-hidden border border-border/55 bg-popover/96 text-popover-foreground supports-[backdrop-filter]:bg-popover/90 supports-[backdrop-filter]:backdrop-blur-md;
+    --command-palette-selected: color-mix(in srgb, var(--macos-accent) 22%, transparent);
+    border-radius: var(--native-panel-radius);
+    box-shadow: var(--native-popover-shadow);
+  }
+
+  .command-palette-shell:has(.command-palette-preview-rail) {
+    width: clamp(48rem, 64vw, 56rem);
+  }
+
+  .dark .command-palette-root {
+    --command-palette-selected: color-mix(in srgb, var(--macos-accent) 42%, transparent);
+  }
+
+  .command-palette-frame {
+    @apply flex flex-col overflow-hidden;
+    max-height: min(58vh, calc(100vh - 8rem));
+  }
+
+  .command-palette-header {
+    @apply border-b border-border/45 px-3 py-2;
+  }
+
+  .command-palette-filter-row {
+    @apply mt-2 flex flex-wrap items-center gap-1.5 px-1;
+  }
+
+  .command-palette-search {
+    @apply h-7;
+  }
+
+  .command-palette-search-input {
+    @apply h-7 w-full bg-transparent px-2 pl-1 text-[13px] outline-hidden placeholder:text-muted-foreground/76 disabled:cursor-not-allowed disabled:opacity-50;
+  }
+
+  .command-palette-body {
+    @apply flex min-h-0 flex-1 gap-0;
+  }
+
+  .command-palette-panel {
+    @apply flex min-h-0 min-w-0 flex-1 flex-col overflow-hidden;
+  }
+
+  .command-palette-list {
+    @apply no-scrollbar min-h-0 flex-1 overflow-x-hidden overflow-y-auto overscroll-contain px-2.5 py-2 outline-none;
+    max-height: min(45vh, calc(100vh - 13rem));
+    scroll-padding-block: 0.5rem;
+  }
+
+  .command-palette-group-heading {
+    @apply px-4 pb-1 text-[11px] font-medium text-muted-foreground/78;
+  }
+
+  .command-palette-shortcut {
+    @apply min-h-5 rounded-md px-1.5 text-[10px] font-medium tracking-normal group-data-selected/command-item:border-white/18 group-data-selected/command-item:bg-white/14 group-data-selected/command-item:text-sidebar-interactive-selected-foreground;
+  }
+
+  .command-palette-shortcut-selected {
+    border-color: oklch(1 0 0 / 0.18) !important;
+    background: oklch(1 0 0 / 0.16) !important;
+    color: var(--sidebar-interactive-selected-foreground) !important;
+  }
+
+  .command-palette-root [data-slot="command-item"] {
+    border-color: transparent !important;
+  }
+
+  .command-palette-root [data-slot="command-item"][data-selected="true"] {
+    background: var(--command-palette-selected) !important;
+    color: var(--sidebar-interactive-selected-foreground);
+  }
+
+  .command-palette-root [data-slot="command-item"][data-selected="true"] svg {
+    color: var(--sidebar-interactive-selected-foreground);
+  }
+
+  .command-palette-preview-rail {
+    @apply hidden w-[20rem] shrink-0 border-l border-border/40 px-0 xl:flex;
+  }
+
+  .command-palette-preview {
+    @apply flex h-full min-h-0 w-full flex-col overflow-hidden bg-transparent py-3 pl-4 pr-3;
+  }
+
+  .new-session-shell {
+    width: clamp(30rem, 48vw, 38rem);
+    max-width: calc(100vw - 2rem);
+  }
+
+  .new-session-frame {
+    @apply flex flex-col overflow-hidden;
+    height: min(32rem, calc(100vh - 4rem));
+    min-height: 22rem;
+  }
+
+  .new-session-header {
+    @apply flex shrink-0 items-center border-b border-border/45 px-5 py-3;
+  }
+
+  .new-session-footer {
+    @apply flex shrink-0 items-center gap-3 border-t border-border/60 px-4 py-2.5;
+  }
+
+  .sidebar-tree-branch {
+    position: relative;
+  }
+
+  .sidebar-tree-branch::before {
+    display: none;
+  }
+}
+
+/* --- Terminal --- */
+/*
+ * Create a stacking context so the WebGL canvas compositing layer stays
+ * within the terminal bounds and doesn't paint over sibling fixed-position
+ * elements (toast notifications, modals) in WKWebView / Tauri v2.
+ *
+ * The bg color hardcodes the xterm theme.background (THEME_LIGHT/THEME_DARK
+ * in session-terminal.tsx) so that *any* sub-pixel gap in the xterm tree
+ * (canvas edge rounding, scrollbar gutter, viewport/screen size mismatch)
+ * blends invisibly with terminal content. Without this, gaps reveal a
+ * different color (app bg, hardcoded black viewport bg, scrollbar corner)
+ * and show as specks at the edges. */
+.terminal-container {
+  isolation: isolate;
+  background-color: #ffffff;
+  overflow: hidden;
+}
+.dark .terminal-container {
+  background-color: #1f1f1f;
+}
+.terminal-container .xterm {
+  height: 100%;
+  overflow: hidden;
+}
+/* xterm ships with a hardcoded `background-color: #000` on .xterm-viewport
+   (for OS X opaque scrollbars, per their CSS comment). When FitAddon
+   floor-rounds the row count, the remainder pixels at the bottom reveal that
+   black bar, which looks broken in both light and dark themes. Make the
+   viewport transparent so the parent container's theme background (set in JS
+   to match the xterm theme) shows through instead.
+
+   Also force `overflow-x: hidden` — xterm's stock CSS sets `overflow-y: scroll`
+   and leaves overflow-x defaulting to `visible`, which browsers compute as
+   `auto`. A subpixel-wider xterm-screen (canvas rounding) then triggers a
+   horizontal scrollbar and renders a corner artifact at bottom-right. */
+.terminal-container .xterm-viewport {
+  background-color: transparent !important;
+  overflow-x: hidden !important;
+}
+/* Non-macOS: thin custom scrollbar for the terminal viewport.
+   macOS uses native overlay scrollbars (see base scoping above). */
+html[data-platform="default"] .terminal-container .xterm-viewport {
+  scrollbar-width: thin;
+  scrollbar-color: oklch(from var(--muted-foreground) l c h / 0.15) transparent;
+}
+html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrollbar {
+  width: 8px;
+}
+html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrollbar-track {
+  background: transparent;
+}
+html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrollbar-thumb {
+  background: oklch(from var(--muted-foreground) l c h / 0.15);
+  border-radius: 4px;
+}
+html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrollbar-thumb:hover {
+  background: oklch(from var(--muted-foreground) l c h / 0.25);
+}
+
+/* --- Mini Terminal (dashboard cards) --- */
+/* Fully non-interactive — all pointer events pass through to the parent card */
+.mini-terminal,
+.mini-terminal * {
+  pointer-events: none !important;
+  user-select: none !important;
+  -webkit-user-select: none !important;
+}
+/* The .xterm element is positioned absolute (bottom:0,left:0) by JS so the
+ * most recent rows stay visible when the PTY grid is taller than the card.
+ * Don't constrain height — let xterm size to its natural canvas height; the
+ * card's overflow:hidden clips the overflow above the visible viewport. */
+.mini-terminal .xterm {
+  padding: 0;
+  background: transparent !important;
+}
+.mini-terminal .xterm-viewport {
+  scrollbar-width: none;
+  overflow: hidden !important;
+}
+.mini-terminal .xterm-viewport::-webkit-scrollbar {
+  display: none;
+}
+.mini-terminal .xterm-helper-textarea,
+.mini-terminal .xterm-accessibility {
+  display: none !important;
+}
+.mini-terminal .xterm-cursor-layer {
+  display: none !important;
+}
+
+/* Hide scrollbar while keeping scroll functionality */
+.scrollbar-hide {
+  -ms-overflow-style: none;
+  scrollbar-width: none;
+}
+.scrollbar-hide::-webkit-scrollbar {
+  display: none;
+}
