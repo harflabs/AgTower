@@ -1,11 +1,51 @@
-import { Bot, Plus, Terminal, Trash2 } from "lucide-react";
+import { Bot, Plus, SlidersHorizontal, Terminal, Trash2 } from "lucide-react";
 import { useEffect, useId, useState } from "react";
 import { useShallow } from "zustand/react/shallow";
 import { IconButton } from "@/components/ui/icon-button";
 import { Input } from "@/components/ui/input";
 import { Label } from "@/components/ui/label";
+import { PreferenceSelect } from "@/components/ui/preference-select";
 import { cn } from "@/lib/utils";
+import { getProvider } from "@/providers/registry";
+import type { LaunchOption } from "@/providers/types";
 import { useSettingsStore } from "@/stores/settings-store";
+
+/** One launch-option default row. Subscribes to its own settings value so a
+ *  change re-renders just this control rather than the whole section. */
+function LaunchOptionRow({ providerId, option }: { providerId: string; option: LaunchOption }) {
+  const value = useSettingsStore(
+    (s) => (s.providerSettings[providerId]?.[option.key] as string) ?? "",
+  );
+  const setProviderSetting = useSettingsStore((s) => s.setProviderSetting);
+  const controlId = useId();
+
+  return (
+    <div className="native-preference-row-start">
+      <div className="flex min-w-0 flex-1 items-start gap-3">
+        <SlidersHorizontal className="mt-0.5 size-4 shrink-0 text-muted-foreground" />
+        <div className="min-w-0">
+          <Label htmlFor={controlId} className="text-sm font-medium">
+            {option.label}
+          </Label>
+          {option.description ? (
+            <p className="text-sm text-muted-foreground">{option.description}</p>
+          ) : null}
+        </div>
+      </div>
+      <div className="native-preference-control mt-0.5">
+        <PreferenceSelect
+          className="w-[190px]"
+          value={value}
+          onValueChange={(next) => setProviderSetting(providerId, option.key, next)}
+          options={option.choices.map((choice) => ({
+            value: choice.value,
+            label: choice.label,
+          }))}
+        />
+      </div>
+    </div>
+  );
+}
 
 interface ProviderCliInfo {
   available: boolean;
@@ -168,6 +208,10 @@ export function ProviderSettingsSection({
             />
           </div>
         </div>
+
+        {(getProvider(providerId)?.launchOptions ?? []).map((option) => (
+          <LaunchOptionRow key={option.key} providerId={providerId} option={option} />
+        ))}
 
         <div className="native-preference-row-start">
           <div className="flex min-w-0 flex-1 items-start gap-3">

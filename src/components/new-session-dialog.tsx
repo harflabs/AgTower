@@ -13,10 +13,11 @@ import {
   CommandList,
   CommandSeparator,
 } from "@/components/ui/command";
+import { PreferenceSelect } from "@/components/ui/preference-select";
 import { useRepo } from "@/hooks/use-repo";
 import { useSession } from "@/hooks/use-session";
 import { cn } from "@/lib/utils";
-import { useAvailableProviders } from "@/providers/registry";
+import { getProvider, useAvailableProviders } from "@/providers/registry";
 import { useModalStore } from "@/stores/modal-store";
 import { type Repository, useRepoStore } from "@/stores/repo-store";
 import { useSettingsStore } from "@/stores/settings-store";
@@ -82,6 +83,9 @@ function MountedNewSessionDialog({ setOpen }: { setOpen: (open: boolean) => void
     return initial?.id ?? defaultProvider;
   });
   const [creating, setCreating] = useState(false);
+  // Per-session launch-option overrides for the selected provider, pre-filled
+  // from saved defaults and overridable for this launch only.
+  const [launchOptionOverrides, setLaunchOptionOverrides] = useState<Record<string, string>>({});
 
   const inputRef = useRef<HTMLInputElement>(null);
   const listRef = useRef<HTMLDivElement>(null);
@@ -170,6 +174,19 @@ function MountedNewSessionDialog({ setOpen }: { setOpen: (open: boolean) => void
     return () => cancelAnimationFrame(id);
   }, []);
 
+  // Reset the per-session overrides whenever the selected provider changes,
+  // seeding each option from the provider's saved default.
+  useEffect(() => {
+    const opts = getProvider(selectedProvider)?.launchOptions ?? [];
+    const settings = useSettingsStore.getState().providerSettings[selectedProvider] ?? {};
+    const init: Record<string, string> = {};
+    for (const opt of opts) {
+      const v = settings[opt.key];
+      init[opt.key] = typeof v === "string" ? v : "";
+    }
+    setLaunchOptionOverrides(init);
+  }, [selectedProvider]);
+
   const moveSelection = useCallback(
     (delta: number) => {
       if (orderedIds.length === 0) return;
@@ -207,6 +224,7 @@ function MountedNewSessionDialog({ setOpen }: { setOpen: (open: boolean) => void
         prompt: "",
         repoId: selectedRepoId,
         providerId: selectedProvider,
+        launchOptions: launchOptionOverrides,
       });
       setOpen(false);
       navigate(`/session/${sessionId}`);
@@ -217,7 +235,15 @@ function MountedNewSessionDialog({ setOpen }: { setOpen: (open: boolean) => void
       });
       setCreating(false);
     }
-  }, [selectedRepoId, selectedProvider, creating, startSession, setOpen, navigate]);
+  }, [
+    selectedRepoId,
+    selectedProvider,
+    launchOptionOverrides,
+    creating,
+    startSession,
+    setOpen,
+    navigate,
+  ]);
 
   const handleKeyDownCapture = useCallback(
     (event: React.KeyboardEvent<HTMLDivElement>) => {
@@ -316,6 +342,11 @@ function MountedNewSessionDialog({ setOpen }: { setOpen: (open: boolean) => void
   const hasWorkspaces = sortedRepos.length > 0;
   const otherHeading =
     pinnedMatches.length > 0 ? "Workspaces" : search.trim() ? "Matches" : "Recent";
+
+  const launchOptions = useMemo(
+    () => getProvider(selectedProvider)?.launchOptions ?? [],
+    [selectedProvider],
+  );
 
   return (
     <CommandDialog
@@ -449,6 +480,32 @@ function MountedNewSessionDialog({ setOpen }: { setOpen: (open: boolean) => void
             )}
           </div>
         </div>
+
+        {launchOptions.length > 0 && (
+          <div className="flex flex-wrap items-end gap-3 border-t border-border/40 px-3 py-2">
+            {launchOptions.map((option) => (
+              <div key={option.key} className="flex flex-col gap-1">
+                <span className="text-xs text-muted-foreground">{option.label}</span>
+                <div
+                  data-new-session-footer-control
+                  className={cn(creating && "pointer-events-none opacity-60")}
+                >
+                  <PreferenceSelect
+                    className="h-7 w-[170px] text-xs"
+                    value={launchOptionOverrides[option.key] ?? ""}
+                    onValueChange={(next) =>
+                      setLaunchOptionOverrides((prev) => ({ ...prev, [option.key]: next }))
+                    }
+                    options={option.choices.map((choice) => ({
+                      value: choice.value,
+                      label: choice.label,
+                    }))}
+                  />
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
 
         <div className="new-session-footer">
           {providers.length > 1 ? (

@@ -23,6 +23,31 @@ const codexProvider: ProviderModule = {
   getActivityText: getCodexActivityText,
   formatTokenSummary: formatCodexTokenSummary,
   getProviderSessionId: getCodexProviderSessionId,
+  launchOptions: [
+    {
+      key: "askForApproval",
+      label: "Approval policy",
+      description: "Passed as --ask-for-approval",
+      choices: [
+        { value: "", label: "Provider default" },
+        { value: "untrusted", label: "untrusted" },
+        { value: "on-failure", label: "on-failure (deprecated)" },
+        { value: "on-request", label: "on-request" },
+        { value: "never", label: "never" },
+      ],
+    },
+    {
+      key: "sandbox",
+      label: "Sandbox mode",
+      description: "Passed as --sandbox",
+      choices: [
+        { value: "", label: "Provider default" },
+        { value: "read-only", label: "read-only" },
+        { value: "workspace-write", label: "workspace-write" },
+        { value: "danger-full-access", label: "danger-full-access" },
+      ],
+    },
+  ],
 };
 
 registerProvider(codexProvider);
