@@ -2,6 +2,7 @@ import { Channel, invoke } from "@tauri-apps/api/core";
 import { getCurrentWebviewWindow } from "@tauri-apps/api/webviewWindow";
 import { FitAddon } from "@xterm/addon-fit";
 import { SearchAddon } from "@xterm/addon-search";
+import { WebLinksAddon } from "@xterm/addon-web-links";
 import { WebglAddon } from "@xterm/addon-webgl";
 import { Terminal } from "@xterm/xterm";
 import { FileDown } from "lucide-react";
@@ -9,6 +10,7 @@ import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "re
 import { toast } from "sonner";
 import "@xterm/xterm/css/xterm.css";
 
+import { openExternalUrl } from "@/lib/open-external";
 import { shouldAutoFocusTerminal } from "@/lib/terminal-focus";
 import {
   disposePoolEntry,
@@ -490,6 +492,12 @@ export const SessionTerminal = forwardRef<SessionTerminalHandle, Props>(function
         smoothScrollDuration: 0,
         minimumContrastRatio: 1,
         drawBoldTextInBrightColors: true,
+        // OSC 8 hyperlinks (e.g. PR "#6" and URLs emitted by Claude Code / gh).
+        // Without this, xterm falls back to `window.open`, which wry swallows
+        // inside the Tauri webview, so clicks silently do nothing.
+        linkHandler: {
+          activate: (_event, uri) => openExternalUrl(uri),
+        },
       });
 
       const fitAddon = new FitAddon();
@@ -497,6 +505,10 @@ export const SessionTerminal = forwardRef<SessionTerminalHandle, Props>(function
 
       const searchAddon = new SearchAddon();
       term.loadAddon(searchAddon);
+
+      // Detect and linkify plain-text URLs that aren't OSC 8 hyperlinks
+      // (e.g. the "create a pull request" URL printed by `git push`).
+      term.loadAddon(new WebLinksAddon((_event, uri) => openExternalUrl(uri)));
 
       term.open(container);
       fitAddon.fit();
