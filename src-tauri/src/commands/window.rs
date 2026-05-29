@@ -600,7 +600,7 @@ pub(crate) fn setup_native_menu(app: &tauri::App) -> tauri::Result<()> {
             AboutMetadataBuilder::new()
                 .name(Some("AgTower"))
                 .version(Some(env!("CARGO_PKG_VERSION")))
-                .website(Some("https://github.com/harflabs/agtower"))
+                .website(Some("https://github.com/harflabs/AgTower"))
                 .website_label(Some("GitHub"))
                 .copyright(Some("Copyright © Harf Labs"))
                 .build(),

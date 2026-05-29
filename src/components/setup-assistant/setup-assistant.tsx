@@ -95,7 +95,7 @@ const SETUP_PROVIDER_META: Record<
   },
 };
 const AGTOWER_WEBSITE_URL = "https://agtower.ai";
-const AGTOWER_REPO_URL = "https://github.com/harflabs/agtower";
+const AGTOWER_REPO_URL = "https://github.com/harflabs/AgTower";
 const ONBOARDING_INSET_CARD_CLASS_NAME = "native-inset-panel";
 
 function getOnboardingChoiceRowClassName(selected: boolean, disabled = false) {
@@ -417,7 +417,7 @@ export function SetupAssistant({ mode, onDone }: SetupAssistantProps) {
       commands.push({
         id: "star-repo",
         title: "Star repo",
-        detail: "github.com/harflabs/agtower",
+        detail: "github.com/harflabs/AgTower",
         group: "This Screen",
         icon: Star,
         aliases: ["github", "open repo", "star github"],
@@ -1407,7 +1407,7 @@ export function SetupAssistant({ mode, onDone }: SetupAssistantProps) {
             <Star className="size-5 shrink-0 text-muted-foreground" />
             <div className="min-w-0 space-y-0.5">
               <p className="text-sm font-medium text-foreground">Star repo</p>
-              <p className="truncate text-sm text-muted-foreground">github.com/harflabs/agtower</p>
+              <p className="truncate text-sm text-muted-foreground">github.com/harflabs/AgTower</p>
             </div>
           </div>
           <ArrowRight className="size-4 shrink-0 text-muted-foreground" />
