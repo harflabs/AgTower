@@ -1,0 +1,60 @@
+[package]
+name = "agtower"
+version = "1.0.0"
+description = "Mission control for AI coding agents across multiple repositories."
+authors = ["Harf Labs"]
+edition = "2021"
+license = "MIT"
+repository = "https://github.com/harflabs/AgTower"
+homepage = "https://github.com/harflabs/AgTower"
+keywords = ["tauri", "ai-agents", "claude-code", "codex", "terminal"]
+categories = ["development-tools"]
+
+# See more keys and their definitions at https://doc.rust-lang.org/cargo/reference/manifest.html
+
+[lib]
+# The `_lib` suffix may seem redundant but it is necessary
+# to make the lib name unique and wouldn't conflict with the bin name.
+# This seems to be only an issue on Windows, see https://github.com/rust-lang/cargo/issues/8519
+name = "agtower_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "2.6.1", features = [] }
+
+[dependencies]
+tauri = { version = "2.11.1", features = ["tray-icon", "macos-private-api", "image-png"] }
+tauri-plugin-opener = "2.5.4"
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tauri-plugin-dialog = "2.7.1"
+tauri-plugin-shell = "2.3.5"
+fix-path-env = { git = "https://github.com/tauri-apps/fix-path-env-rs", rev = "c4c45d503ea115a839aae718d02f79e7c7f0f673" }
+rusqlite = { version = "0.39", features = ["bundled"] }
+tauri-plugin-deep-link = "2.4.9"
+tauri-plugin-global-shortcut = "2.3.1"
+tauri-plugin-notification = "2.3.3"
+tauri-plugin-process = "2.3.1"
+tauri-plugin-single-instance = { version = "2.4.2", features = ["deep-link"] }
+tauri-plugin-updater = "2.10.1"
+tauri-plugin-window-state = "2.4.1"
+dirs = "6"
+chrono = "0.4"
+portable-pty = "0.9"
+parking_lot = "0.12"
+base64 = "0.22"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+objc2 = "0.6"
+objc2-app-kit = { version = "0.3", features = [
+    "NSApplication",
+    "NSButton",
+    "NSColor",
+    "NSColorSpace",
+    "NSImage",
+    "NSTitlebarAccessoryViewController",
+    "NSToolbar",
+    "NSWindow",
+] }
+objc2-foundation = "0.3"
+window-vibrancy = "0.7"

@@ -1,0 +1,72 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "AgTower",
+  "version": "1.0.0",
+  "identifier": "com.harflabs.agtower",
+  "build": {
+    "beforeDevCommand": "pnpm dev",
+    "devUrl": "http://localhost:1420",
+    "beforeBuildCommand": "pnpm build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [
+      {
+        "label": "main",
+        "title": "AgTower",
+        "width": 1280,
+        "height": 800,
+        "minWidth": 900,
+        "minHeight": 600,
+        "visible": true,
+        "decorations": true,
+        "hiddenTitle": true,
+        "titleBarStyle": "Overlay",
+        "devtools": false,
+        "transparent": true,
+        "acceptFirstMouse": true,
+        "allowLinkPreview": true
+      }
+    ],
+    "security": {
+      "csp": "default-src 'self'; style-src 'self' 'unsafe-inline'; font-src 'self' data:; img-src 'self' data:; script-src 'self'"
+    }
+  },
+  "plugins": {
+    "deep-link": {
+      "desktop": {
+        "schemes": ["agtower"]
+      }
+    },
+    "updater": {
+      "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhERkMzMDMzNjU3NzA2MTIKUldRU0JuZGxNekQ4amRIWkpWWTZPbDM0QUJwQnl2M2ZObTAyUzZlR2RpUFJGQTdHTjhZeVNna04K",
+      "endpoints": [
+        "https://github.com/harflabs/agtower/releases/latest/download/latest.json"
+      ],
+      "windows": {
+        "installMode": "passive"
+      }
+    }
+  },
+  "bundle": {
+    "active": true,
+    "createUpdaterArtifacts": true,
+    "category": "DeveloperTool",
+    "copyright": "Copyright (c) Harf Labs",
+    "targets": ["app", "dmg"],
+    "icon": [
+      "icons/icon.icns"
+    ],
+    "macOS": {
+      "minimumSystemVersion": "13.0",
+      "entitlements": "Entitlements.plist",
+      "signingIdentity": "-",
+      "files": {
+        "Resources/Assets.car": "resources/Assets.car",
+        "Resources/tmux.conf": "resources/tmux.conf",
+        "Resources/bin/agtower-hook": "resources/bin/agtower-hook"
+      }
+    }
+  }
+}
