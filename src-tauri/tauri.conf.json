@@ -42,7 +42,7 @@
     "updater": {
       "pubkey": "dW50cnVzdGVkIGNvbW1lbnQ6IG1pbmlzaWduIHB1YmxpYyBrZXk6IDhERkMzMDMzNjU3NzA2MTIKUldRU0JuZGxNekQ4amRIWkpWWTZPbDM0QUJwQnl2M2ZObTAyUzZlR2RpUFJGQTdHTjhZeVNna04K",
       "endpoints": [
-        "https://github.com/harflabs/agtower/releases/latest/download/latest.json"
+        "https://github.com/harflabs/AgTower/releases/latest/download/latest.json"
       ],
       "windows": {
         "installMode": "passive"

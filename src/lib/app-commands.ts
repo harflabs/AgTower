@@ -187,7 +187,7 @@ export async function executeAppCommand(
       useModalStore.getState().setShortcutModalOpen(true);
       break;
     case "open-help-docs":
-      await openUrl("https://github.com/harflabs/agtower#readme");
+      await openUrl("https://github.com/harflabs/AgTower#readme");
       break;
     case "new-session":
       useModalStore.getState().setNewSessionDialogOpen(true);
