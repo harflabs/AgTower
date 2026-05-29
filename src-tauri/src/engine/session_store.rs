@@ -829,6 +829,9 @@ impl SessionStore {
         //    the session to terminate. We deliberately skip token aggregation
         //    here so the broadened trigger can't regress live token/model state,
         //    and to keep the per-turn cost down (this fires on every Stop hook).
+        //    Gated to Claude Code: it is the only provider that records a
+        //    `/rename` on disk (`custom-title`), so re-extracting Codex on every
+        //    turn boundary would parse its rollout for a title that can't change.
         //
         // Both reuse the same background extraction thread (a pure read), so
         // neither blocks the status update. The Stop trigger is gated on an
@@ -841,7 +844,8 @@ impl SessionStore {
             && matches!(
                 new_status,
                 SessionStatus::Idle | SessionStatus::NeedsAttention
-            );
+            )
+            && updated.provider == "claude-code";
         if terminal_extract || stop_extract {
             let session_id = updated.id.clone();
             let provider_id = updated.provider.clone();
