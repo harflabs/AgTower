@@ -245,10 +245,181 @@ impl FlowControl {
 // Ring buffer
 // ---------------------------------------------------------------------------
 
+/// Minimal sniffer for the one-time terminal-setup state a TUI emits at
+/// startup — alternate-screen enable, scroll region (DECSTBM), and origin
+/// mode. The byte ring evicts these early sequences once a session streams
+/// past its 2 MB capacity, so a raw snapshot tail would replay into a terminal
+/// left at xterm defaults: the wrong scroll region makes the TUI's
+/// bottom-anchored absolute redraws pile onto the last rows (issue #10). We
+/// observe the setup as it streams past — before eviction — and re-emit it as
+/// a preamble in the preview bootstrap so the replayed tail lands correctly.
+///
+/// Only these few short sequences are parsed; all other output (colours,
+/// content, cursor moves) is ignored and never mutated.
+#[derive(Default)]
+struct TermSetup {
+    /// Active alternate-screen private mode (1049 / 1047 / 47), `None` on the
+    /// main screen.
+    alt_screen: Option<u16>,
+    /// DECSTBM scroll region as 1-based `(top, bottom)`, `None` for the default
+    /// full-screen region.
+    scroll_region: Option<(u16, u16)>,
+    /// DECOM origin mode.
+    origin_mode: bool,
+    /// Trailing bytes of a possibly-incomplete escape sequence, carried to the
+    /// next chunk so a sequence split across reads is still parsed.
+    pending: Vec<u8>,
+}
+
+/// Cap on carried partial-sequence bytes; a longer unterminated sequence is
+/// dropped rather than buffered unboundedly.
+const TERM_SETUP_PENDING_MAX: usize = 64;
+
+fn parse_csi_u16(bytes: &[u8]) -> Option<u16> {
+    if bytes.is_empty() {
+        return None;
+    }
+    let mut v: u32 = 0;
+    for &b in bytes {
+        if !b.is_ascii_digit() {
+            return None;
+        }
+        v = v.saturating_mul(10).saturating_add((b - b'0') as u32);
+        if v > u16::MAX as u32 {
+            return Some(u16::MAX);
+        }
+    }
+    Some(v as u16)
+}
+
+impl TermSetup {
+    /// Observe a freshly-read output chunk, updating the tracked setup state.
+    fn observe(&mut self, data: &[u8]) {
+        if self.pending.is_empty() {
+            self.scan(data);
+        } else {
+            let mut combined = std::mem::take(&mut self.pending);
+            combined.extend_from_slice(data);
+            self.scan(&combined);
+        }
+    }
+
+    fn scan(&mut self, data: &[u8]) {
+        let len = data.len();
+        let mut i = 0;
+        while i < len {
+            if data[i] != 0x1b {
+                i += 1;
+                continue;
+            }
+            if i + 1 >= len {
+                self.carry(&data[i..]);
+                return;
+            }
+            if data[i + 1] != b'[' {
+                // ESC c (RIS) resets everything; other escapes aren't setup.
+                if data[i + 1] == b'c' {
+                    self.alt_screen = None;
+                    self.scroll_region = None;
+                    self.origin_mode = false;
+                }
+                i += 2;
+                continue;
+            }
+            // CSI: ESC [ [?] params [intermediates] final(0x40..=0x7e)
+            let mut j = i + 2;
+            let private = j < len && data[j] == b'?';
+            if private {
+                j += 1;
+            }
+            let params_start = j;
+            while j < len && (data[j].is_ascii_digit() || data[j] == b';') {
+                j += 1;
+            }
+            let params_end = j;
+            while j < len && (0x20..=0x2f).contains(&data[j]) {
+                j += 1;
+            }
+            if j >= len {
+                // Unterminated — carry from the ESC so the next chunk completes it.
+                self.carry(&data[i..]);
+                return;
+            }
+            let final_byte = data[j];
+            if (0x40..=0x7e).contains(&final_byte) {
+                self.apply_csi(private, &data[params_start..params_end], final_byte);
+            }
+            i = j + 1;
+        }
+    }
+
+    fn apply_csi(&mut self, private: bool, params: &[u8], final_byte: u8) {
+        match (private, final_byte) {
+            (true, b'h') | (true, b'l') => {
+                let set = final_byte == b'h';
+                for p in params.split(|&b| b == b';') {
+                    match parse_csi_u16(p) {
+                        Some(mode @ (1049 | 1047 | 47)) => {
+                            self.alt_screen = if set { Some(mode) } else { None };
+                        }
+                        Some(6) => self.origin_mode = set,
+                        _ => {}
+                    }
+                }
+            }
+            (false, b'r') => {
+                // DECSTBM: `CSI t ; b r`, or `CSI r` (reset to full screen).
+                if params.is_empty() {
+                    self.scroll_region = None;
+                } else {
+                    let parts: Vec<&[u8]> = params.split(|&b| b == b';').collect();
+                    if parts.len() == 2 {
+                        if let (Some(t), Some(b)) =
+                            (parse_csi_u16(parts[0]), parse_csi_u16(parts[1]))
+                        {
+                            self.scroll_region = Some((t, b));
+                        }
+                    }
+                }
+            }
+            _ => {}
+        }
+    }
+
+    fn carry(&mut self, tail: &[u8]) {
+        if tail.len() <= TERM_SETUP_PENDING_MAX {
+            self.pending = tail.to_vec();
+        } else {
+            // Too long to be one of our short setup sequences; drop it.
+            self.pending.clear();
+        }
+    }
+
+    /// Re-emit the tracked setup as a self-contained preamble. Order matters:
+    /// entering the alt screen clears it (clean canvas for the replayed tail),
+    /// then the scroll region and origin mode are re-established.
+    fn preamble(&self) -> Vec<u8> {
+        let mut p = Vec::new();
+        if let Some(mode) = self.alt_screen {
+            p.extend_from_slice(format!("\x1b[?{mode}h").as_bytes());
+        }
+        if let Some((top, bottom)) = self.scroll_region {
+            p.extend_from_slice(format!("\x1b[{top};{bottom}r").as_bytes());
+        }
+        if self.origin_mode {
+            p.extend_from_slice(b"\x1b[?6h");
+        }
+        p
+    }
+}
+
 struct RingBuffer {
     buf: Vec<u8>,
     write_pos: usize,
     len: usize,
+    /// Tracks the TUI's one-time setup so previews can reconstruct it even
+    /// after the original sequences scroll out of the ring (issue #10).
+    setup: TermSetup,
 }
 
 impl RingBuffer {
@@ -257,11 +428,29 @@ impl RingBuffer {
             buf: vec![0u8; capacity],
             write_pos: 0,
             len: 0,
+            setup: TermSetup::default(),
         }
+    }
+
+    /// A self-contained preamble that re-establishes the TUI's setup state
+    /// (alt-screen / scroll region / origin) for replay into a fresh terminal.
+    ///
+    /// Only emitted once the ring has wrapped (`len == capacity`). While the
+    /// snapshot still starts at byte 0 it already carries the original setup at
+    /// its true position, so a synthetic preamble would just prepend redundant
+    /// bytes — and could re-assert a later state ahead of earlier snapshot
+    /// bytes. The preamble is only needed once earlier bytes have been evicted.
+    fn setup_preamble(&self) -> Vec<u8> {
+        if self.len < self.buf.len() {
+            return Vec::new();
+        }
+        self.setup.preamble()
     }
 
     /// Append data to the ring buffer, overwriting oldest bytes when full.
     fn push_slice(&mut self, data: &[u8]) {
+        // Track setup sequences before they can be evicted from the ring.
+        self.setup.observe(data);
         let cap = self.buf.len();
         if data.len() >= cap {
             let start = data.len() - cap;
@@ -1669,7 +1858,14 @@ impl PtyManager {
         let (cols, rows) = *handle.dimensions.lock();
         let (snapshot, output_offset) = {
             let rb = handle.ring_buffer.lock();
-            let snap = B64.encode(rb.snapshot());
+            // Prepend the tracked setup preamble so a wrapped (mid-stream) tail
+            // replays with the correct scroll region/alt-screen instead of
+            // piling its bottom-anchored redraws onto the last rows (issue #10).
+            // Synthetic bytes only — output_offset stays the real byte count, so
+            // live deltas still resume exactly where the snapshot ends.
+            let mut bytes = rb.setup_preamble();
+            bytes.extend_from_slice(&rb.snapshot());
+            let snap = B64.encode(&bytes);
             let offset = handle.output_offset.load(Ordering::SeqCst);
             (snap, offset)
         };
@@ -2243,6 +2439,84 @@ mod tests {
             .expect("decode preview bootstrap");
         assert_eq!(decoded.len(), full.len());
         assert_eq!(decoded, full.as_bytes());
+    }
+
+    // --- TermSetup: preview-snapshot setup reconstruction (issue #10) ----------
+
+    #[test]
+    fn term_setup_tracks_alt_screen_region_and_origin() {
+        let mut s = TermSetup::default();
+        s.observe(b"\x1b[?1049h\x1b[2;23r\x1b[?6hactual TUI content here");
+        assert_eq!(s.preamble(), b"\x1b[?1049h\x1b[2;23r\x1b[?6h".to_vec());
+    }
+
+    #[test]
+    fn term_setup_alt_screen_exit_clears() {
+        let mut s = TermSetup::default();
+        s.observe(b"\x1b[?1049h");
+        s.observe(b"\x1b[?1049l");
+        assert!(s.preamble().is_empty(), "left alt screen -> no preamble");
+    }
+
+    #[test]
+    fn term_setup_handles_sequence_split_across_chunks() {
+        let mut s = TermSetup::default();
+        // DECSTBM split mid-sequence across two reads.
+        s.observe(b"prefix\x1b[2;");
+        s.observe(b"40rmore");
+        assert_eq!(s.preamble(), b"\x1b[2;40r".to_vec());
+    }
+
+    #[test]
+    fn term_setup_ris_resets_everything() {
+        let mut s = TermSetup::default();
+        s.observe(b"\x1b[?1049h\x1b[5;10r\x1b[?6h");
+        s.observe(b"\x1bc");
+        assert!(s.preamble().is_empty(), "RIS resets all tracked setup");
+    }
+
+    #[test]
+    fn term_setup_decstbm_reset_clears_region() {
+        let mut s = TermSetup::default();
+        s.observe(b"\x1b[3;20r");
+        s.observe(b"\x1b[r");
+        assert!(
+            s.preamble().is_empty(),
+            "CSI r resets to full-screen region"
+        );
+    }
+
+    #[test]
+    fn term_setup_plain_content_has_empty_preamble() {
+        let mut s = TermSetup::default();
+        s.observe(b"plain output\nwith newlines and \x1b[31mcolor\x1b[0m but no setup");
+        assert!(s.preamble().is_empty());
+    }
+
+    #[test]
+    fn term_setup_latest_region_wins() {
+        let mut s = TermSetup::default();
+        s.observe(b"\x1b[1;50r");
+        s.observe(b"\x1b[2;40r");
+        assert_eq!(s.preamble(), b"\x1b[2;40r".to_vec());
+    }
+
+    #[test]
+    fn ring_buffer_setup_preamble_only_after_wrap() {
+        // Small ring so we can force a wrap cheaply. Setup (14 bytes) fits.
+        let mut rb = RingBuffer::new(16);
+        rb.push_slice(b"\x1b[?1049h\x1b[2;9r");
+        assert!(
+            rb.setup_preamble().is_empty(),
+            "not wrapped: snapshot still contains the original setup at byte 0"
+        );
+        // Push past capacity -> oldest bytes (the setup) are evicted.
+        rb.push_slice(b"aaaaaaaaaa");
+        assert_eq!(
+            rb.setup_preamble(),
+            b"\x1b[?1049h\x1b[2;9r".to_vec(),
+            "wrapped: preamble reconstructs the evicted setup"
+        );
     }
 }
 

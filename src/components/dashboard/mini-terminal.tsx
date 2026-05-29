@@ -342,6 +342,22 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
       currentRevision = snapshot.revision;
       resetWriteQueue();
       syncGeometryFromDims(snapshot.cols, snapshot.rows);
+      // Row-matching invariant guard (issue #10): the mini must render at the
+      // same row count the snapshot bytes targeted, or TUI absolute cursor
+      // moves clamp onto the bottom rows and pile up. syncGeometryFromDims
+      // should have just made these equal; if they diverge the snapshot will
+      // render garbled, so surface it loudly instead of failing silently. (A
+      // sub-10px card legitimately skips the resize — don't warn then.)
+      if (
+        term.rows !== snapshot.rows &&
+        el.clientWidth >= 10 &&
+        el.clientHeight >= 10 &&
+        snapshot.data.length > 0
+      ) {
+        console.warn(
+          `[mini-terminal] row mismatch for ${sessionId}: term has ${term.rows} rows but snapshot targets ${snapshot.rows} — preview may render garbled`,
+        );
+      }
       term.reset();
 
       const payload = snapshot.data.length > 0 ? snapshot.data : getPlaceholder(snapshot);

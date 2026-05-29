@@ -22,7 +22,9 @@ class MockTerminal {
 
   dispose = vi.fn();
 
-  loadAddon = vi.fn();
+  loadAddon = vi.fn((addon: { activate?: (terminal: MockTerminal) => void }) => {
+    addon.activate?.(this);
+  });
 
   open = vi.fn();
 
@@ -72,6 +74,23 @@ vi.mock("@tauri-apps/api/event", () => ({
 
 vi.mock("@xterm/xterm", () => ({
   Terminal: MockTerminal,
+}));
+
+// SerializeAddon.serialize() reconstructs the terminal's grid. The mock mirrors
+// that contract: it returns the terminal's accumulated buffer text, so a
+// serialized pooled/headless snapshot reflects what the source terminal holds
+// rather than the raw ring-buffer tail.
+vi.mock("@xterm/addon-serialize", () => ({
+  SerializeAddon: class {
+    target: MockTerminal | null = null;
+    activate(terminal: MockTerminal) {
+      this.target = terminal;
+    }
+    serialize() {
+      return this.target?.buffer ?? "";
+    }
+    dispose() {}
+  },
 }));
 
 vi.mock("@/stores/session-store", () => ({
@@ -146,7 +165,11 @@ describe("terminal preview sources", () => {
     vi.useRealTimers();
   });
 
-  it("bootstraps from a parked pooled terminal when one is available", async () => {
+  it("serializes the parked pooled terminal's buffer instead of the raw tail", async () => {
+    // Issue #10: the backend snapshot is a raw ring-buffer TAIL that, for long
+    // sessions, has lost the TUI's setup and renders garbled. When a parked
+    // pool entry exists we must instead serialize ITS reconstructed buffer (a
+    // self-contained, correctly-positioned grid) and ship that as the snapshot.
     invokeMock.mockResolvedValue({
       processState: "running",
       attachmentState: "parked",
@@ -165,10 +188,44 @@ describe("terminal preview sources", () => {
 
     const subscription = await mod.subscribeToPreviewSource("session-1", {});
 
-    expect(decodeSnapshot(subscription.snapshot.data)).toBe("backend bootstrap");
+    // The snapshot body is the parked terminal's serialized buffer, NOT the
+    // raw ring-buffer tail returned by the backend bootstrap.
+    expect(decodeSnapshot(subscription.snapshot.data)).toBe("pooled viewport");
+    // Dims come from the source terminal so they match the serialized bytes'
+    // geometry (the row-matching invariant the mini relies on).
     expect(subscription.snapshot.cols).toBe(96);
     expect(subscription.snapshot.rows).toBe(30);
     expect(MockTerminal.instances).toHaveLength(initialInstanceCount);
+
+    subscription.unsubscribe();
+  });
+
+  it("takes pooled snapshot dims from the source terminal, not the bootstrap", async () => {
+    // The bootstrap reports the CURRENT PTY dims, which can drift from the
+    // geometry the parked terminal's buffer was actually drawn at (e.g. a
+    // resize mid-session updates `dimensions` but not the ring buffer). The
+    // serialized snapshot must carry the SOURCE terminal's dims so the mini
+    // sizes itself to match the bytes — otherwise absolute cursor moves clamp.
+    invokeMock.mockResolvedValue({
+      processState: "running",
+      attachmentState: "parked",
+      cols: 200,
+      rows: 99,
+      snapshot: encode("stale tail"),
+      outputOffset: "stale tail".length,
+    });
+
+    const mod = await import("@/lib/terminal-pool");
+    const entry = createPooledEntry("real grid", 96, 30);
+    mod.setPoolEntry("session-dims", entry as never);
+    mod.parkTerminal("session-dims");
+
+    const subscription = await mod.subscribeToPreviewSource("session-dims", {});
+
+    expect(decodeSnapshot(subscription.snapshot.data)).toBe("real grid");
+    // Source terminal dims (96x30) win over the bootstrap's drifted dims.
+    expect(subscription.snapshot.cols).toBe(96);
+    expect(subscription.snapshot.rows).toBe(30);
 
     subscription.unsubscribe();
   });

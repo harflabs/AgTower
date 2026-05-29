@@ -14,6 +14,7 @@ import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import type { FitAddon } from "@xterm/addon-fit";
 import type { SearchAddon } from "@xterm/addon-search";
+import { SerializeAddon } from "@xterm/addon-serialize";
 import { Terminal } from "@xterm/xterm";
 import { useSessionStore } from "@/stores/session-store";
 import { clampTerminalFontSize } from "@/stores/settings-store";
@@ -51,6 +52,51 @@ function decodeBase64(b64: string): Uint8Array {
     if (j < outLen) out[j++] = ((c & 3) << 6) | d;
   }
   return out;
+}
+
+// ── xterm buffer serialization for self-contained preview snapshots ─
+//
+// A raw PTY ring-buffer tail is NOT a safe preview snapshot: for any session
+// past RING_BUFFER_CAPACITY (2 MB) the tail begins mid-stream, so the TUI's
+// one-time setup (alt-screen enter `?1049h`, DECSTBM scroll region, cursor
+// origin) has already been evicted. Replaying that tail into a fresh xterm
+// leaves the scroll region/origin at xterm defaults, so the TUI's
+// bottom-anchored absolute cursor moves (`CSI N;1H`) target the wrong rows
+// and xterm's `_restrictCursor` clamps them onto the bottom — the piled-up
+// "garbled" bottom region reported in issue #10.
+//
+// `SerializeAddon.serialize()` instead emits the source terminal's already
+// reconstructed grid row-by-row using ONLY relative cursor moves (never
+// absolute `CSI N;1H`), plus an `?1049h`/`?1049l` preamble for the alt
+// buffer. The result is self-contained: writing it into a same-size fresh
+// xterm reproduces the grid exactly, with no out-of-range cursor moves to
+// clamp. Live raw-byte deltas then continue to apply on top, because the
+// serialized stream leaves the parser in the correct cursor/screen state.
+const serializeAddons = new WeakMap<Terminal, SerializeAddon>();
+
+function ensureSerializeAddon(terminal: Terminal): SerializeAddon {
+  let addon = serializeAddons.get(terminal);
+  if (!addon) {
+    addon = new SerializeAddon();
+    terminal.loadAddon(addon);
+    serializeAddons.set(terminal, addon);
+  }
+  return addon;
+}
+
+/**
+ * Serialize a source terminal's buffer into a self-contained escape stream
+ * the mini-terminal can replay without inheriting the raw-tail pile-up.
+ *
+ * `scrollback: PREVIEW_SCROLLBACK` bounds the cost (the preview only shows the
+ * viewport plus a little context) and matches the mini's own scrollback. Alt
+ * buffer and terminal modes are included (defaults) so Claude/Codex TUIs that
+ * render on the alternate screen round-trip correctly.
+ */
+function serializeTerminalSnapshot(terminal: Terminal): Uint8Array {
+  const addon = ensureSerializeAddon(terminal);
+  const serialized = addon.serialize({ scrollback: PREVIEW_SCROLLBACK });
+  return new TextEncoder().encode(serialized);
 }
 
 export interface PooledTerminal {
@@ -645,8 +691,19 @@ async function buildHeadlessSnapshot(
     scheduleHeadlessFlush(source, 0);
   }
 
+  // Serialize the headless terminal's reconstructed grid rather than handing
+  // the mini the raw ring-buffer tail (issue #10). Even though the headless
+  // terminal only parsed the same tail, its serialized output uses relative
+  // cursor moves only (no absolute `CSI N;1H`), so re-applying it can't trip
+  // xterm's out-of-range cursor clamp and pile onto the bottom rows. Dims come
+  // from the source terminal to keep the snapshot's geometry self-consistent.
+  const serialized = serializeTerminalSnapshot(headless.terminal);
   source.revision += 1;
-  return buildPreviewSnapshot(state, snapshotData, source.revision);
+  return buildPreviewSnapshot(
+    { ...state, cols: headless.terminal.cols, rows: headless.terminal.rows },
+    serialized,
+    source.revision,
+  );
 }
 
 async function buildPooledSnapshot(
@@ -675,8 +732,19 @@ async function buildPooledSnapshot(
     return buildHeadlessSnapshot(source, state);
   }
 
+  // Serialize the parked terminal's reconstructed buffer instead of replaying
+  // the raw ring-buffer tail (issue #10). The parked terminal saw the full
+  // stream — startParkedBroadcast keeps it current — so its grid is correct.
+  // Take cols/rows from the source terminal so the snapshot dims match the
+  // bytes' actual geometry (enforces the row-matching invariant the mini
+  // relies on; bootstrap dims can drift if the PTY was resized mid-session).
+  const snapshotData = serializeTerminalSnapshot(entry.terminal);
   source.revision += 1;
-  return buildPreviewSnapshot(state, decodeBase64(bootstrap?.snapshot ?? ""), source.revision);
+  return buildPreviewSnapshot(
+    { ...state, cols: entry.terminal.cols, rows: entry.terminal.rows },
+    snapshotData,
+    source.revision,
+  );
 }
 
 async function performPreviewResync(
