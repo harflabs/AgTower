@@ -434,7 +434,16 @@ impl RingBuffer {
 
     /// A self-contained preamble that re-establishes the TUI's setup state
     /// (alt-screen / scroll region / origin) for replay into a fresh terminal.
+    ///
+    /// Only emitted once the ring has wrapped (`len == capacity`). While the
+    /// snapshot still starts at byte 0 it already carries the original setup at
+    /// its true position, so a synthetic preamble would just prepend redundant
+    /// bytes — and could re-assert a later state ahead of earlier snapshot
+    /// bytes. The preamble is only needed once earlier bytes have been evicted.
     fn setup_preamble(&self) -> Vec<u8> {
+        if self.len < self.buf.len() {
+            return Vec::new();
+        }
         self.setup.preamble()
     }
 
@@ -2490,6 +2499,24 @@ mod tests {
         s.observe(b"\x1b[1;50r");
         s.observe(b"\x1b[2;40r");
         assert_eq!(s.preamble(), b"\x1b[2;40r".to_vec());
+    }
+
+    #[test]
+    fn ring_buffer_setup_preamble_only_after_wrap() {
+        // Small ring so we can force a wrap cheaply. Setup (14 bytes) fits.
+        let mut rb = RingBuffer::new(16);
+        rb.push_slice(b"\x1b[?1049h\x1b[2;9r");
+        assert!(
+            rb.setup_preamble().is_empty(),
+            "not wrapped: snapshot still contains the original setup at byte 0"
+        );
+        // Push past capacity -> oldest bytes (the setup) are evicted.
+        rb.push_slice(b"aaaaaaaaaa");
+        assert_eq!(
+            rb.setup_preamble(),
+            b"\x1b[?1049h\x1b[2;9r".to_vec(),
+            "wrapped: preamble reconstructs the evicted setup"
+        );
     }
 }
 
