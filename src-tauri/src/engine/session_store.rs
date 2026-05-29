@@ -72,9 +72,77 @@ impl SessionStatus {
     }
 }
 
+/// Whether a title looks auto-generated (a placeholder AgTower assigned), as
+/// opposed to a title the user typed in the sidebar. Auto titles may be
+/// freely overwritten by a provider-derived slug; user titles must not.
+fn is_auto_generated_title(title: &str) -> bool {
+    title.starts_with("New Session")
+        || title.starts_with("Session ")
+        || title == "Untitled CLI session"
+        || (title.contains('<') && title.contains('>'))
+}
+
+/// Decide whether a provider re-extraction should change the session title,
+/// and to what. Returns `None` to leave the title unchanged (a no-op).
+///
+/// Precedence:
+///  1. An explicit `/rename` (`custom_title`, non-empty) is a deliberate user
+///     action. It overrides an auto-generated title unconditionally. Against a
+///     user-set *sidebar* title it only wins when the CLI rename is provably
+///     newer (`custom_title_at` > `user_title_set_at`) — otherwise we'd let a
+///     stale `custom-title` still sitting in the JSONL revert a sidebar rename
+///     the user made afterwards (`rename_session` is DB-only and never rewrites
+///     the JSONL). If `custom_title` already equals the current title, no-op.
+///  2. Otherwise a provider `slug` only overwrites an AUTO-generated title.
+///     This protects a manual sidebar rename from being clobbered by an
+///     auto-derived slug.
+///  3. Otherwise leave the title as-is.
+///
+/// `custom_title_at` / `user_title_set_at` are epoch-ms; either may be `None`.
+/// When the CLI rename's recency can't be established but a sidebar rename
+/// exists, the sidebar title is preserved.
+fn select_extracted_title(
+    current_title: &str,
+    custom_title: Option<&str>,
+    custom_title_at: Option<i64>,
+    slug: Option<&str>,
+    user_title_set_at: Option<i64>,
+) -> Option<String> {
+    if let Some(t) = custom_title {
+        let t = t.trim();
+        if !t.is_empty() {
+            if t == current_title {
+                return None;
+            }
+            // Auto titles always yield to an explicit rename. A user's sidebar
+            // title only yields when the CLI rename is provably newer than it.
+            let cli_wins = is_auto_generated_title(current_title)
+                || match (custom_title_at, user_title_set_at) {
+                    (_, None) => true,
+                    (Some(cli), Some(user)) => cli > user,
+                    (None, Some(_)) => false,
+                };
+            if cli_wins {
+                return Some(t.to_string());
+            }
+            // A newer sidebar rename — don't clobber it; fall through (the slug
+            // branch won't touch a non-auto title either).
+        }
+    }
+    if let Some(s) = slug {
+        if is_auto_generated_title(current_title) && s != current_title {
+            return Some(s.to_string());
+        }
+    }
+    None
+}
+
 #[cfg(test)]
 mod tests {
-    use super::{apply_updates, duplicate_session_ids, Session, SessionStatus, SessionUpdate};
+    use super::{
+        apply_updates, duplicate_session_ids, is_auto_generated_title, select_extracted_title,
+        Session, SessionStatus, SessionUpdate,
+    };
     use serde_json::json;
     use std::collections::HashMap;
 
@@ -328,6 +396,130 @@ mod tests {
             serde_json::from_str::<SessionStatus>(r#""needsAttention""#).unwrap(),
             SessionStatus::NeedsAttention
         );
+    }
+
+    // -- title precedence (issue #9: CLI /rename -> sidebar) -----------------
+
+    #[test]
+    fn is_auto_generated_title_recognizes_placeholders() {
+        assert!(is_auto_generated_title("New Session"));
+        assert!(is_auto_generated_title("New Session 3"));
+        assert!(is_auto_generated_title("Session abc123"));
+        assert!(is_auto_generated_title("Untitled CLI session"));
+        assert!(is_auto_generated_title("<some prompt fragment>"));
+        // A real user title is not auto-generated.
+        assert!(!is_auto_generated_title("Fix the login bug"));
+        assert!(!is_auto_generated_title("my-feature-branch"));
+    }
+
+    #[test]
+    fn custom_title_overrides_auto_title() {
+        // (a) An explicit /rename replaces an auto-generated title. No competing
+        // sidebar rename, so timestamps don't matter.
+        let chosen = select_extracted_title(
+            "New Session",
+            Some("Refactor auth"),
+            Some(100),
+            Some("some-slug"),
+            None,
+        );
+        assert_eq!(chosen, Some("Refactor auth".to_string()));
+    }
+
+    #[test]
+    fn cli_rename_overrides_older_sidebar_rename() {
+        // A CLI /rename wins over a user sidebar title when it is newer.
+        let chosen = select_extracted_title(
+            "Set in sidebar",
+            Some("Renamed in CLI"),
+            Some(300),
+            Some("ignored-slug"),
+            Some(200),
+        );
+        assert_eq!(chosen, Some("Renamed in CLI".to_string()));
+    }
+
+    #[test]
+    fn newer_sidebar_rename_is_not_clobbered_by_stale_cli_rename() {
+        // Regression guard (issue #9 review): a stale custom-title left in the
+        // JSONL must NOT revert a sidebar rename the user made afterwards.
+        let chosen = select_extracted_title(
+            "Set in sidebar",
+            Some("Old CLI title"),
+            Some(100),
+            Some("foo-slug"),
+            Some(200),
+        );
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn cli_rename_wins_when_no_sidebar_stamp() {
+        // A non-auto title with no sidebar stamp (e.g. it came from an earlier
+        // CLI rename) yields to a newer CLI rename.
+        let chosen = select_extracted_title(
+            "Earlier CLI title",
+            Some("Newer CLI title"),
+            None,
+            None,
+            None,
+        );
+        assert_eq!(chosen, Some("Newer CLI title".to_string()));
+    }
+
+    #[test]
+    fn cli_rename_without_timestamp_preserves_user_title() {
+        // If we can't prove the CLI rename is newer than the sidebar rename,
+        // preserve the user's sidebar title.
+        let chosen = select_extracted_title(
+            "Set in sidebar",
+            Some("Untimestamped CLI title"),
+            None,
+            None,
+            Some(200),
+        );
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn custom_title_equal_to_current_is_a_noop() {
+        // No-op when the explicit rename already matches the current title.
+        let chosen =
+            select_extracted_title("Same Title", Some("Same Title"), Some(100), None, None);
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn empty_custom_title_falls_back_to_slug_rules() {
+        // An empty/whitespace custom_title is ignored; slug rules apply instead.
+        let chosen =
+            select_extracted_title("New Session", Some("   "), None, Some("derived-slug"), None);
+        assert_eq!(chosen, Some("derived-slug".to_string()));
+    }
+
+    #[test]
+    fn slug_only_overrides_when_title_is_auto() {
+        // (c) With no custom_title, slug overwrites ONLY an auto-generated title.
+        let from_auto = select_extracted_title("New Session", None, None, Some("real-slug"), None);
+        assert_eq!(from_auto, Some("real-slug".to_string()));
+
+        // (d) A user-set (non-auto) title is preserved against a slug-only update.
+        let from_user =
+            select_extracted_title("My Manual Title", None, None, Some("real-slug"), Some(200));
+        assert_eq!(from_user, None);
+    }
+
+    #[test]
+    fn slug_equal_to_current_auto_title_is_a_noop() {
+        // Auto title that already equals the slug should not re-emit a change.
+        let chosen = select_extracted_title("real-slug", None, None, Some("real-slug"), None);
+        assert_eq!(chosen, None);
+    }
+
+    #[test]
+    fn no_signals_leaves_title_unchanged() {
+        let chosen = select_extracted_title("Whatever", None, None, None, None);
+        assert_eq!(chosen, None);
     }
 }
 
@@ -626,17 +818,44 @@ impl SessionStore {
             }
         }
 
-        // Auto-extract metadata when a session stops running
+        // Auto-extract provider metadata. Two triggers, two scopes:
+        //
+        //  - TERMINAL (running/idle/needsAttention -> closed/archived): the
+        //    full pack — tokens, turns, model, provider_data, and title. Token
+        //    aggregation is only meaningful once the session is done.
+        //
+        //  - STOP (running -> idle/needsAttention): a LIGHT, title-only pass so
+        //    that a CLI `/rename` lands in the sidebar LIVE, without waiting for
+        //    the session to terminate. We deliberately skip token aggregation
+        //    here so the broadened trigger can't regress live token/model state,
+        //    and to keep the per-turn cost down (this fires on every Stop hook).
+        //    Gated to Claude Code: it is the only provider that records a
+        //    `/rename` on disk (`custom-title`), so re-extracting Codex on every
+        //    turn boundary would parse its rollout for a title that can't change.
+        //
+        // Both reuse the same background extraction thread (a pure read), so
+        // neither blocks the status update. The Stop trigger is gated on an
+        // actual status change (running -> non-running-active) so a repeated
+        // same-status update is a no-op.
         let was_running = old_status.is_active();
         let is_done = new_status.is_terminal();
-        if was_running && is_done {
-            // Auto-extract metadata from provider in background
+        let terminal_extract = was_running && is_done;
+        let stop_extract = old_status == SessionStatus::Running
+            && matches!(
+                new_status,
+                SessionStatus::Idle | SessionStatus::NeedsAttention
+            )
+            && updated.provider == "claude-code";
+        if terminal_extract || stop_extract {
             let session_id = updated.id.clone();
             let provider_id = updated.provider.clone();
             let repo_path = updated.repo_path.clone();
             let provider_data = updated.provider_data.clone();
             let created_at = updated.created_at;
             let app = self.app_handle.clone();
+            // On the Stop (non-terminal) trigger, restrict to title + slug +
+            // provider identity; leave token aggregation to the terminal path.
+            let title_only = stop_extract && !terminal_extract;
             std::thread::spawn(move || {
                 let Some(engine) = app.try_state::<Arc<crate::engine::Engine>>() else {
                     return;
@@ -653,25 +872,28 @@ impl SessionStore {
                 };
 
                 let mut updates = SessionUpdate::default();
-                if metadata.model.is_some() {
-                    updates.model = Some(metadata.model);
-                }
-                if metadata.num_turns > 0 {
-                    updates.num_turns = Some(Some(metadata.num_turns as i64));
-                }
-                if metadata.total_input_tokens > 0 {
-                    updates.total_input_tokens = Some(Some(metadata.total_input_tokens as i64));
-                }
-                if metadata.total_output_tokens > 0 {
-                    updates.total_output_tokens = Some(Some(metadata.total_output_tokens as i64));
-                }
-                if metadata.total_cache_read_tokens > 0 {
-                    updates.total_cache_read_tokens =
-                        Some(Some(metadata.total_cache_read_tokens as i64));
-                }
-                if metadata.total_cache_write_tokens > 0 {
-                    updates.total_cache_write_tokens =
-                        Some(Some(metadata.total_cache_write_tokens as i64));
+                if !title_only {
+                    if metadata.model.is_some() {
+                        updates.model = Some(metadata.model);
+                    }
+                    if metadata.num_turns > 0 {
+                        updates.num_turns = Some(Some(metadata.num_turns as i64));
+                    }
+                    if metadata.total_input_tokens > 0 {
+                        updates.total_input_tokens = Some(Some(metadata.total_input_tokens as i64));
+                    }
+                    if metadata.total_output_tokens > 0 {
+                        updates.total_output_tokens =
+                            Some(Some(metadata.total_output_tokens as i64));
+                    }
+                    if metadata.total_cache_read_tokens > 0 {
+                        updates.total_cache_read_tokens =
+                            Some(Some(metadata.total_cache_read_tokens as i64));
+                    }
+                    if metadata.total_cache_write_tokens > 0 {
+                        updates.total_cache_write_tokens =
+                            Some(Some(metadata.total_cache_write_tokens as i64));
+                    }
                 }
                 // Pack provider-specific metadata into provider_data
                 let mut pd = serde_json::Map::new();
@@ -683,15 +905,23 @@ impl SessionStore {
                 }
                 if let Some(ref slug) = metadata.slug {
                     pd.insert("slug".into(), Value::String(slug.clone()));
-                    // Auto-update title from slug if current title is auto-generated
-                    if let Some(session) = engine.sessions.get(&session_id) {
-                        let is_auto = session.title.starts_with("New Session")
-                            || session.title.starts_with("Session ")
-                            || session.title == "Untitled CLI session"
-                            || (session.title.contains('<') && session.title.contains('>'));
-                        if is_auto {
-                            updates.title = Some(slug.clone());
-                        }
+                }
+                // Title precedence: an explicit CLI /rename overrides an auto
+                // title (and a sidebar title only if it's newer); a slug only
+                // overrides an auto title. See select_extracted_title.
+                if let Some(session) = engine.sessions.get(&session_id) {
+                    let user_title_set_at = session
+                        .provider_data
+                        .get("titleSetAt")
+                        .and_then(|v| v.as_i64());
+                    if let Some(new_title) = select_extracted_title(
+                        &session.title,
+                        metadata.custom_title.as_deref(),
+                        metadata.custom_title_at,
+                        metadata.slug.as_deref(),
+                        user_title_set_at,
+                    ) {
+                        updates.title = Some(new_title);
                     }
                 }
                 if !pd.is_empty() {

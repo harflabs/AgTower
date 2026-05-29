@@ -14,6 +14,10 @@ interface SessionMetadata {
   provider_session_id: string | null;
   provider_file_path: string | null;
   slug: string | null;
+  // Always null for Codex (no `/rename` equivalent); present for type parity
+  // with the shared Rust SessionMetadata struct.
+  custom_title: string | null;
+  custom_title_at: number | null;
 }
 
 interface RustDiscoveredCodexSession {
