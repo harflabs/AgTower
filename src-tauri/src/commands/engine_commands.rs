@@ -95,14 +95,30 @@ pub(crate) fn rename_session(
     id: String,
     title: String,
 ) -> Result<(), String> {
-    // DB-only rename. The launcher forwards the new title to Claude via
-    // `--name <title>` on the next launch (see providers/claude-code/launcher.ts).
+    // DB-only rename (Direction 2 of issue #9). We deliberately do NOT try to
+    // propagate the new title into an already-running provider session:
+    //   - The PTY is a shared interactive TUI, not a command bus. Injecting
+    //     `/rename <title>` would land in whatever input context is focused
+    //     (a prompt, a y/n approval, text the user is composing) and there is
+    //     no ACK/round-trip to confirm it took or to roll back on error.
+    //   - `/rename` is Claude-specific; Codex has no equivalent command or flag.
+    // So the title reconciles into the actual CLI session only on the NEXT
+    // launch/resume, via `--name <title>` for Claude
+    // (see providers/claude-code/launcher.ts). Codex never forwards the title.
+    //
+    // Stamp `titleSetAt` so the live re-extraction can tell which rename is
+    // newer: a CLI `/rename` left in the JSONL must not revert a sidebar rename
+    // the user made afterwards (see engine::session_store::select_extracted_title).
     let slug = title_to_slug(&title);
+    let title_set_at = std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map(|d| d.as_millis() as i64)
+        .unwrap_or(0);
     engine.sessions.update(
         &id,
         SessionUpdate {
             title: Some(title.clone()),
-            provider_data: Some(serde_json::json!({"slug": slug})),
+            provider_data: Some(serde_json::json!({"slug": slug, "titleSetAt": title_set_at})),
             ..Default::default()
         },
     )?;

@@ -15,6 +15,12 @@ interface SessionMetadata {
   provider_session_id: string | null;
   provider_file_path: string | null;
   slug: string | null;
+  // Exact title from an explicit CLI `/rename`. Applied to the session title
+  // by the Rust auto-title path (engine::session_store), not here.
+  custom_title: string | null;
+  // Epoch-ms of that `/rename`, used by the Rust path for recency vs a sidebar
+  // rename. Not consumed in TS.
+  custom_title_at: number | null;
 }
 
 // Matches Rust DiscoveredCliSession struct (snake_case from serde)

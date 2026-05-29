@@ -728,6 +728,13 @@ fn parse_session_metadata(path: &PathBuf) -> Result<SessionMetadata, String> {
 
     let mut model: Option<String> = None;
     let mut slug: Option<String> = None;
+    // Exact title from an explicit `/rename` in the Claude CLI. Tracked
+    // separately from `slug` so an explicit user rename can override even a
+    // non-auto AgTower title (see engine::session_store auto-title block).
+    let mut custom_title: Option<String> = None;
+    // When that `/rename` happened (epoch ms), used to settle recency against
+    // a sidebar rename. Captured alongside `custom_title` so the latest wins.
+    let mut custom_title_at: Option<i64> = None;
     let mut num_turns: u32 = 0;
     let mut total_input_tokens: u64 = 0;
     let mut total_output_tokens: u64 = 0;
@@ -829,6 +836,20 @@ fn parse_session_metadata(path: &PathBuf) -> Result<SessionMetadata, String> {
                     slug = Some(s.to_string());
                 }
             }
+            // Explicit rename via the `/rename` command. Mirrors the scan-path
+            // parser (parse_jsonl_metadata) — last write wins, same as slug.
+            "custom-title" => {
+                if let Some(t) = parsed.get("customTitle").and_then(|v| v.as_str()) {
+                    custom_title = Some(t.to_string());
+                    // Capture the rename's timestamp (if any) so the auto-title
+                    // logic can compare it against a sidebar rename's recency.
+                    custom_title_at = parsed
+                        .get("timestamp")
+                        .and_then(|v| v.as_str())
+                        .and_then(|ts| chrono::DateTime::parse_from_rfc3339(ts).ok())
+                        .map(|dt| dt.timestamp_millis());
+                }
+            }
             _ => {
                 // Always update slug from progress/system/any entries
                 if let Some(s) = parsed.get("slug").and_then(|v| v.as_str()) {
@@ -856,6 +877,8 @@ fn parse_session_metadata(path: &PathBuf) -> Result<SessionMetadata, String> {
     Ok(SessionMetadata {
         model,
         slug,
+        custom_title,
+        custom_title_at,
         num_turns,
         total_input_tokens,
         total_output_tokens,
