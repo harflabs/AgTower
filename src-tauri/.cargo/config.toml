@@ -1,4 +1,4 @@
 [profile.release]
-lto = true
+lto = "thin"
 strip = "symbols"
 codegen-units = 1
