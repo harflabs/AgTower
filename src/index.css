@@ -2,6 +2,14 @@
 @import "tw-animate-css";
 @import "@fontsource-variable/inter";
 @import "@fontsource-variable/jetbrains-mono";
+/* Bundle xterm's stylesheet here (not via a JS `import` in the terminal
+   components) so it lands in this single CSS file in a deterministic order —
+   after Tailwind's layered preflight, before our unlayered `.mini-terminal`
+   overrides below. A JS import instead let vite.config's `vendor-terminal`
+   chunk split it into a separate stylesheet whose `<link>` order flipped
+   relative to dev, breaking the DOM-renderer mini-terminal previews in
+   production only. Keep it here to guarantee prod == dev cascade. */
+@import "@xterm/xterm/css/xterm.css";
 
 /* Inlined from the `shadcn` package's dist/tailwind.css so the shadcn scaffolding CLI is
    not a build dependency (it otherwise drags in a full express/MCP server tree). These

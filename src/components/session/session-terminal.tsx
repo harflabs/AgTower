@@ -8,7 +8,8 @@ import { Terminal } from "@xterm/xterm";
 import { FileDown } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { toast } from "sonner";
-import "@xterm/xterm/css/xterm.css";
+// xterm.css is bundled via src/index.css (see the @import there), not here —
+// see the note in src/index.css for why a JS import broke prod CSS ordering.
 
 import { openExternalUrl } from "@/lib/open-external";
 import { shouldAutoFocusTerminal } from "@/lib/terminal-focus";

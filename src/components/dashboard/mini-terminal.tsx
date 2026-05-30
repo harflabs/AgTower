@@ -1,6 +1,9 @@
 import { Terminal } from "@xterm/xterm";
 import { memo, useEffect, useRef } from "react";
-import "@xterm/xterm/css/xterm.css";
+// xterm.css is bundled via src/index.css (see the @import there) so it ships in
+// a single, deterministically-ordered stylesheet. Importing it here let the
+// `vendor-terminal` build chunk split it into a separate <link> whose order
+// flipped vs dev and garbled these previews in production.
 
 import {
   type PreviewSourceDelta,
