@@ -250,6 +250,17 @@ impl Database {
         Ok(())
     }
 
+    pub(crate) fn get_setting(&self, key: &str) -> SqlResult<Option<String>> {
+        self.conn
+            .lock()
+            .query_row(
+                "SELECT value FROM settings WHERE key = ?1",
+                params![key],
+                |r| r.get(0),
+            )
+            .optional()
+    }
+
     pub(crate) fn load_all_settings(&self) -> SqlResult<Vec<(String, String)>> {
         let conn = self.conn.lock();
         let mut stmt = conn.prepare("SELECT key, value FROM settings")?;
@@ -478,6 +489,13 @@ mod tests {
                 .map(|(_, v)| v.clone()),
             Some("true".to_string())
         );
+
+        // Single-key getter (used by the one-time title backfill guard).
+        assert_eq!(
+            db.get_setting("notificationsEnabled").unwrap(),
+            Some("true".to_string())
+        );
+        assert_eq!(db.get_setting("missingKey").unwrap(), None);
 
         db.save_workspace_state("activeSessionId", "session-1")
             .unwrap();

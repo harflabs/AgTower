@@ -62,8 +62,8 @@ function decodeBase64(b64: string): Uint8Array {
 // origin) has already been evicted. Replaying that tail into a fresh xterm
 // leaves the scroll region/origin at xterm defaults, so the TUI's
 // bottom-anchored absolute cursor moves (`CSI N;1H`) target the wrong rows
-// and xterm's `_restrictCursor` clamps them onto the bottom — the piled-up
-// "garbled" bottom region reported in issue #10.
+// and xterm's `_restrictCursor` clamps them onto the bottom — the piled-up,
+// "garbled" bottom region.
 //
 // `SerializeAddon.serialize()` instead emits the source terminal's already
 // reconstructed grid row-by-row using ONLY relative cursor moves (never
@@ -692,7 +692,7 @@ async function buildHeadlessSnapshot(
   }
 
   // Serialize the headless terminal's reconstructed grid rather than handing
-  // the mini the raw ring-buffer tail (issue #10). Even though the headless
+  // the mini the raw ring-buffer tail. Even though the headless
   // terminal only parsed the same tail, its serialized output uses relative
   // cursor moves only (no absolute `CSI N;1H`), so re-applying it can't trip
   // xterm's out-of-range cursor clamp and pile onto the bottom rows. Dims come
@@ -733,7 +733,7 @@ async function buildPooledSnapshot(
   }
 
   // Serialize the parked terminal's reconstructed buffer instead of replaying
-  // the raw ring-buffer tail (issue #10). The parked terminal saw the full
+  // the raw ring-buffer tail. The parked terminal saw the full
   // stream — startParkedBroadcast keeps it current — so its grid is correct.
   // Take cols/rows from the source terminal so the snapshot dims match the
   // bytes' actual geometry (enforces the row-matching invariant the mini

@@ -95,8 +95,8 @@ pub(crate) fn rename_session(
     id: String,
     title: String,
 ) -> Result<(), String> {
-    // DB-only rename (Direction 2 of issue #9). We deliberately do NOT try to
-    // propagate the new title into an already-running provider session:
+    // DB-only rename. We deliberately do NOT try to propagate the new title
+    // into an already-running provider session:
     //   - The PTY is a shared interactive TUI, not a command bus. Injecting
     //     `/rename <title>` would land in whatever input context is focused
     //     (a prompt, a y/n approval, text the user is composing) and there is

@@ -250,8 +250,8 @@ impl FlowControl {
 /// mode. The byte ring evicts these early sequences once a session streams
 /// past its 2 MB capacity, so a raw snapshot tail would replay into a terminal
 /// left at xterm defaults: the wrong scroll region makes the TUI's
-/// bottom-anchored absolute redraws pile onto the last rows (issue #10). We
-/// observe the setup as it streams past — before eviction — and re-emit it as
+/// bottom-anchored absolute redraws pile onto the last rows. We observe the
+/// setup as it streams past — before eviction — and re-emit it as
 /// a preamble in the preview bootstrap so the replayed tail lands correctly.
 ///
 /// Only these few short sequences are parsed; all other output (colours,
@@ -418,7 +418,7 @@ struct RingBuffer {
     write_pos: usize,
     len: usize,
     /// Tracks the TUI's one-time setup so previews can reconstruct it even
-    /// after the original sequences scroll out of the ring (issue #10).
+    /// after the original sequences scroll out of the ring.
     setup: TermSetup,
 }
 
@@ -1860,7 +1860,7 @@ impl PtyManager {
             let rb = handle.ring_buffer.lock();
             // Prepend the tracked setup preamble so a wrapped (mid-stream) tail
             // replays with the correct scroll region/alt-screen instead of
-            // piling its bottom-anchored redraws onto the last rows (issue #10).
+            // piling its bottom-anchored redraws onto the last rows.
             // Synthetic bytes only — output_offset stays the real byte count, so
             // live deltas still resume exactly where the snapshot ends.
             let mut bytes = rb.setup_preamble();
@@ -2441,7 +2441,7 @@ mod tests {
         assert_eq!(decoded, full.as_bytes());
     }
 
-    // --- TermSetup: preview-snapshot setup reconstruction (issue #10) ----------
+    // --- TermSetup: preview-snapshot setup reconstruction ----------------------
 
     #[test]
     fn term_setup_tracks_alt_screen_region_and_origin() {
