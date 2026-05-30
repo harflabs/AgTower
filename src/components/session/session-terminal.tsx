@@ -634,6 +634,15 @@ export const SessionTerminal = forwardRef<SessionTerminalHandle, Props>(function
     // terminals lose the handler when they're disposed/recreated, and
     // attachCustomKeyEventHandler replaces any previous callback.
     mountEntry.terminal.attachCustomKeyEventHandler((ev: KeyboardEvent) => {
+      // Let the global keyboard handler own the session switcher (Ctrl+Tab /
+      // Ctrl+Shift+Tab) even while the terminal is focused. Returning false
+      // makes xterm ignore the key without consuming it, so the event bubbles
+      // to the window keydown handler in use-keyboard-shortcuts.ts. Without
+      // this, xterm swallows it and the switcher only works when a non-terminal
+      // element (e.g. the sidebar) holds focus.
+      if (ev.key === "Tab" && ev.ctrlKey && !ev.metaKey && !ev.altKey) {
+        return false;
+      }
       if (ev.key === "Enter" && ev.shiftKey && !ev.ctrlKey && !ev.metaKey && !ev.altKey) {
         ev.preventDefault();
         if (ev.type === "keydown") {
