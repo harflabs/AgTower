@@ -352,17 +352,24 @@ export function useKeyboardShortcuts(
         if (!activeScopes.includes(s.scope)) return false;
 
         const needsMeta = s.modifiers?.meta ?? false;
+        const needsCtrl = s.modifiers?.ctrl ?? false;
         const needsShift = s.modifiers?.shift ?? false;
         const needsAlt = s.modifiers?.alt ?? false;
 
-        if (needsMeta !== isMeta) return false;
+        if (needsCtrl) {
+          // Ctrl-specific chord: require the physical Control key without Cmd,
+          // so it never overlaps a Cmd shortcut or the macOS Cmd+Tab switcher.
+          if (!e.ctrlKey || e.metaKey) return false;
+        } else if (needsMeta !== isMeta) {
+          return false;
+        }
         const isShiftedChar = s.key.length === 1 && s.key !== s.key.toLowerCase();
         const keyImpliesShift = isShiftedChar || '?!@#$%^&*()_+{}|:"<>~'.includes(s.key);
         if (!keyImpliesShift && needsShift !== e.shiftKey) return false;
         if (needsAlt !== e.altKey) return false;
 
         // Input guard: block non-modifier shortcuts when input is focused
-        if (inputFocused && !needsMeta) return false;
+        if (inputFocused && !needsMeta && !needsCtrl) return false;
 
         const commandId = ACTION_COMMANDS[s.actionId];
         if (commandId && !shouldHandleAppCommandInRenderer(commandId, USES_NATIVE_MACOS_MENU)) {

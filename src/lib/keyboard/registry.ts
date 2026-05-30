@@ -124,6 +124,25 @@ export const SHORTCUTS: ShortcutDefinition[] = [
     label: "Previous open session",
     actionId: "prev-open-session",
   },
+  // Tab-switcher aliases for the open-session cycle, matching the Ctrl+Tab
+  // convention from terminals and tab-based apps. Ctrl is distinct from Cmd
+  // (Cmd+Tab is the macOS app switcher), so these use the `ctrl` modifier.
+  {
+    id: "nav.next-open-tab",
+    key: "Tab",
+    modifiers: { ctrl: true },
+    scope: "global",
+    label: "Next open session",
+    actionId: "next-open-session",
+  },
+  {
+    id: "nav.prev-open-tab",
+    key: "Tab",
+    modifiers: { ctrl: true, shift: true },
+    scope: "global",
+    label: "Previous open session",
+    actionId: "prev-open-session",
+  },
 
   // Navigation — leader sequences
   {
@@ -232,6 +251,8 @@ export function formatShortcutLabel(def: ShortcutDefinition): string {
       parts.push(def.leader.toUpperCase());
       parts.push(" then ");
     }
+    // Order follows the macOS convention: \u2303\u2325\u21e7\u2318.
+    if (def.modifiers?.ctrl) parts.push("\u2303");
     if (def.modifiers?.alt) parts.push("\u2325");
     if (def.modifiers?.shift) parts.push("\u21e7");
     if (def.modifiers?.meta) parts.push("\u2318");
@@ -244,7 +265,7 @@ export function formatShortcutLabel(def: ShortcutDefinition): string {
     parts.push(def.leader.toUpperCase());
     parts.push(" then ");
   }
-  if (def.modifiers?.meta) parts.push("Ctrl+");
+  if (def.modifiers?.meta || def.modifiers?.ctrl) parts.push("Ctrl+");
   if (def.modifiers?.shift) parts.push("Shift+");
   if (def.modifiers?.alt) parts.push("Alt+");
   parts.push(def.key.length === 1 ? def.key.toUpperCase() : def.key);
@@ -258,6 +279,7 @@ function formatMacKey(key: string): string {
   if (key === "ArrowLeft") return "\u2190";
   if (key === "ArrowRight") return "\u2192";
   if (key === "Enter") return "\u21b5";
+  if (key === "Tab") return "\u21e5";
   if (key === "Backspace") return "\u232b";
   if (key === "Delete") return "\u2326";
   return key.length === 1 ? key.toUpperCase() : key;

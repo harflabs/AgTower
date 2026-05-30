@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { SHORTCUTS } from "@/lib/keyboard/registry";
+import { formatShortcutLabel, SHORTCUTS } from "@/lib/keyboard/registry";
 import type { ShortcutDefinition } from "@/lib/keyboard/types";
 
 // The keydown dispatcher in use-keyboard-shortcuts.ts uses SHORTCUTS.find(...),
@@ -8,8 +8,9 @@ import type { ShortcutDefinition } from "@/lib/keyboard/types";
 //
 // The signature below mirrors the dispatcher's real matcher exactly:
 //   - key: e.key.length === 1 ? e.key.toLowerCase() : e.key  (eventKey)
-//   - meta: s.modifiers?.meta ?? false  (compared to metaKey || ctrlKey; there is
-//     no separate ctrl field in ShortcutDefinition, so meta covers both)
+//   - meta: s.modifiers?.meta ?? false  (compared to metaKey || ctrlKey)
+//   - ctrl: s.modifiers?.ctrl ?? false  (the physical Control key, distinct from
+//     meta: matches ctrlKey && !metaKey, used for Ctrl+Tab-style chords)
 //   - shift: s.modifiers?.shift ?? false, BUT when the key itself implies shift
 //     (an uppercase single char, or one of ?!@#$%^&*()_+{}|:"<>~) the dispatcher
 //     ignores the shift modifier, so we normalize the effective shift to true.
@@ -28,11 +29,17 @@ function keyImpliesShift(key: string): boolean {
 
 function signature(def: ShortcutDefinition): string {
   const meta = def.modifiers?.meta ?? false;
+  const ctrl = def.modifiers?.ctrl ?? false;
   const alt = def.modifiers?.alt ?? false;
   const shift = keyImpliesShift(def.key) ? true : (def.modifiers?.shift ?? false);
-  return [normalizeKey(def.key), `meta:${meta}`, `shift:${shift}`, `alt:${alt}`, def.scope].join(
-    "|",
-  );
+  return [
+    normalizeKey(def.key),
+    `meta:${meta}`,
+    `ctrl:${ctrl}`,
+    `shift:${shift}`,
+    `alt:${alt}`,
+    def.scope,
+  ].join("|");
 }
 
 // Two scopes "collide" only if both can be active simultaneously. The dispatcher
@@ -92,6 +99,27 @@ describe("SHORTCUTS registry integrity", () => {
     }
 
     expect(collisions, `colliding leader sequences: ${collisions.join("; ")}`).toEqual([]);
+  });
+
+  it("binds Ctrl+Tab / Ctrl+Shift+Tab to the open-session cycle", () => {
+    const next = SHORTCUTS.find((s) => s.id === "nav.next-open-tab");
+    const prev = SHORTCUTS.find((s) => s.id === "nav.prev-open-tab");
+
+    // Reuse the same actions as Cmd+] / Cmd+[ so the behavior stays identical.
+    expect(next?.actionId).toBe("next-open-session");
+    expect(prev?.actionId).toBe("prev-open-session");
+
+    // Ctrl-specific (not meta) so they don't collide with Cmd shortcuts.
+    expect(next?.modifiers).toEqual({ ctrl: true });
+    expect(prev?.modifiers).toEqual({ ctrl: true, shift: true });
+    expect(next?.key).toBe("Tab");
+    expect(prev?.key).toBe("Tab");
+
+    // The chord must render in the help modal / shortcut bar (Tab + the Ctrl
+    // modifier), independent of the macOS vs. non-macOS label style.
+    expect(formatShortcutLabel(next as ShortcutDefinition)).toMatch(/Tab|⇥/);
+    expect(formatShortcutLabel(next as ShortcutDefinition)).toMatch(/Ctrl|⌃/);
+    expect(formatShortcutLabel(prev as ShortcutDefinition)).toMatch(/Shift|⇧/);
   });
 
   it("populates the required fields on every entry", () => {
