@@ -7,7 +7,17 @@ export interface ShortcutDefinition {
   key: string;
   /** Required modifier keys */
   modifiers?: {
+    /**
+     * Primary modifier — Cmd on macOS, Ctrl elsewhere. The dispatcher treats
+     * metaKey and ctrlKey interchangeably for this flag.
+     */
     meta?: boolean;
+    /**
+     * The physical Control key, distinct from {@link meta}. Matches only when
+     * Ctrl is held without Cmd, so Ctrl-specific chords (e.g. Ctrl+Tab) don't
+     * collide with macOS Cmd shortcuts.
+     */
+    ctrl?: boolean;
     shift?: boolean;
     alt?: boolean;
   };

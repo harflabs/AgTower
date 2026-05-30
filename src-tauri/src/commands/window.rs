@@ -593,6 +593,21 @@ fn emit_command(app: &AppHandle, command_id: &str) {
 }
 
 pub(crate) fn setup_native_menu(app: &tauri::App) -> tauri::Result<()> {
+    // Opt out of macOS automatic window tabbing. Otherwise AppKit reserves
+    // Ctrl+Tab / Ctrl+Shift+Tab for its "Show Next/Previous Tab" commands and
+    // consumes those key events before they reach the webview — which would
+    // stop the in-app session switcher (registered in keyboard/registry.ts)
+    // from ever firing. Safe here: setup() runs on the main thread, so
+    // MainThreadMarker::new() returns Some; it no-ops off-thread.
+    #[cfg(target_os = "macos")]
+    {
+        use objc2_app_kit::NSWindow;
+        use objc2_foundation::MainThreadMarker;
+        if let Some(mtm) = MainThreadMarker::new() {
+            NSWindow::setAllowsAutomaticWindowTabbing(false, mtm);
+        }
+    }
+
     let about = PredefinedMenuItem::about(
         app,
         Some("About AgTower"),
