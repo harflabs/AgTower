@@ -97,3 +97,27 @@ jobs:
       #
       # `createUpdaterArtifacts: true` in tauri.conf.json + the signing
       # env vars above are what make those artifacts appear.
+
+      - name: Publish a version-stable DMG
+        # tauri-action uploads the DMG under its versioned Tauri name
+        # (`AgTower_<version>_aarch64.dmg`). Re-publish it under a fixed name so
+        # the stable download URL keeps working across every release:
+        #   https://github.com/harflabs/AgTower/releases/latest/download/AgTower.dmg
+        # Only the DMG is touched; the updater chain (latest.json + the
+        # version-less .app.tar.gz it points at) is intentionally left alone.
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          set -euo pipefail
+          DMG=$(find src-tauri/target -path '*/bundle/dmg/*.dmg' -print -quit)
+          if [ -z "$DMG" ]; then
+            echo "No DMG found under src-tauri/target/**/bundle/dmg/" >&2
+            exit 1
+          fi
+          echo "Found DMG: $DMG"
+          cp "$DMG" AgTower.dmg
+          # Upload the stable name, then drop the versioned duplicate so the
+          # release exposes a single, predictable DMG asset.
+          gh release upload "$TAG" AgTower.dmg --clobber
+          gh release delete-asset "$TAG" "$(basename "$DMG")" --yes || true
