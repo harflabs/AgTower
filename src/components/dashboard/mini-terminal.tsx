@@ -342,7 +342,7 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
       currentRevision = snapshot.revision;
       resetWriteQueue();
       syncGeometryFromDims(snapshot.cols, snapshot.rows);
-      // Row-matching invariant guard (issue #10): the mini must render at the
+      // Row-matching invariant guard: the mini must render at the
       // same row count the snapshot bytes targeted, or TUI absolute cursor
       // moves clamp onto the bottom rows and pile up. syncGeometryFromDims
       // should have just made these equal; if they diverge the snapshot will

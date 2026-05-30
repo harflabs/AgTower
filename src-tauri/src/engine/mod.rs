@@ -96,14 +96,23 @@ impl Engine {
     ///
     /// **Order matters:**
     /// 1. Load from DB (populates memory)
-    /// 2. Recover stale sessions (PID-liveness check)
-    /// 3. Auto-archive stale closed sessions
+    /// 2. Backfill `titleSetAt` on pre-existing titles (runs once)
+    /// 3. Recover stale sessions (PID-liveness check)
+    /// 4. Auto-archive stale closed sessions
     pub(crate) fn startup(&self) -> Result<(), String> {
         // Load repos first (sessions reference repo_id)
         self.repos.load_from_db()?;
 
         // Load sessions
         self.sessions.load_from_db()?;
+
+        // Stamp `titleSetAt` on pre-existing non-auto titles so a stale
+        // `custom-title` in a provider log can't override a title the user set
+        // in the sidebar. The live re-extraction treats an unstamped title as
+        // fair game for a CLI `/rename`; stamping marks these existing titles as
+        // user-owned as of now. Guarded so it runs exactly once and never
+        // re-stamps freshly imported sessions, whose `/rename` must still win.
+        self.backfill_title_set_at_once();
 
         // PID-liveness reconciliation: flip any DB session marked active whose
         // stored PID is no longer alive to `closed`.
@@ -114,6 +123,26 @@ impl Engine {
         self.sessions.auto_archive_stale(archive_days);
 
         Ok(())
+    }
+
+    /// Run the title backfill exactly once, guarded by a settings flag so
+    /// freshly imported sessions are never re-stamped on later startups.
+    fn backfill_title_set_at_once(&self) {
+        const FLAG: &str = "titleSetAtBackfillV1";
+        if matches!(self.db.get_setting(FLAG), Ok(Some(_))) {
+            return; // already run
+        }
+        let stamped = self.sessions.backfill_title_set_at(epoch_ms());
+        match self.db.set_setting(FLAG, "done") {
+            Ok(()) => {
+                if stamped > 0 {
+                    eprintln!("[engine] title-provenance backfill stamped {stamped} session(s)");
+                }
+            }
+            // If the flag write fails we re-run next startup; it's idempotent
+            // (already-stamped sessions are skipped), so no data is harmed.
+            Err(e) => eprintln!("[engine] failed to record title backfill flag: {e}"),
+        }
     }
 
     // -----------------------------------------------------------------------

@@ -137,6 +137,20 @@ fn select_extracted_title(
     None
 }
 
+/// Whether a session should receive a one-time `titleSetAt` backfill: it has a
+/// user-meaningful (non-auto) title but no `titleSetAt` stamp.
+///
+/// Stamping marks the existing title as user-owned as of now, so a stale
+/// `custom-title` in a provider log can't revert it on the next re-extraction,
+/// while a genuinely newer `/rename` still wins on recency.
+fn needs_title_set_at_backfill(title: &str, provider_data: &Value) -> bool {
+    !is_auto_generated_title(title)
+        && provider_data
+            .get("titleSetAt")
+            .and_then(|v| v.as_i64())
+            .is_none()
+}
+
 #[cfg(test)]
 mod tests {
     use super::{
@@ -398,7 +412,7 @@ mod tests {
         );
     }
 
-    // -- title precedence (issue #9: CLI /rename -> sidebar) -----------------
+    // -- title precedence (CLI /rename -> sidebar) ---------------------------
 
     #[test]
     fn is_auto_generated_title_recognizes_placeholders() {
@@ -441,8 +455,8 @@ mod tests {
 
     #[test]
     fn newer_sidebar_rename_is_not_clobbered_by_stale_cli_rename() {
-        // Regression guard (issue #9 review): a stale custom-title left in the
-        // JSONL must NOT revert a sidebar rename the user made afterwards.
+        // Regression guard: a stale custom-title left in the JSONL must NOT
+        // revert a sidebar rename the user made afterwards.
         let chosen = select_extracted_title(
             "Set in sidebar",
             Some("Old CLI title"),
@@ -520,6 +534,36 @@ mod tests {
     fn no_signals_leaves_title_unchanged() {
         let chosen = select_extracted_title("Whatever", None, None, None, None);
         assert_eq!(chosen, None);
+    }
+
+    // -- title-provenance backfill -------------------------------------------
+
+    #[test]
+    fn backfill_targets_only_unstamped_non_auto_titles() {
+        use super::needs_title_set_at_backfill;
+        // Non-auto title with no stamp -> needs backfill (incl. when other
+        // provider_data keys like slug are present).
+        assert!(needs_title_set_at_backfill("Fix the login bug", &json!({})));
+        assert!(needs_title_set_at_backfill(
+            "Fix the login bug",
+            &json!({ "slug": "fix-login" })
+        ));
+        // Already stamped -> skip.
+        assert!(!needs_title_set_at_backfill(
+            "Fix the login bug",
+            &json!({ "titleSetAt": 1_700_000_000_000_i64 })
+        ));
+        // Auto-generated titles are never user-owned -> skip.
+        assert!(!needs_title_set_at_backfill("New Session", &json!({})));
+        assert!(!needs_title_set_at_backfill(
+            "Untitled CLI session",
+            &json!({})
+        ));
+        // A non-integer / null stamp is treated as missing.
+        assert!(needs_title_set_at_backfill(
+            "Fix the login bug",
+            &json!({ "titleSetAt": null })
+        ));
     }
 }
 
@@ -738,6 +782,37 @@ impl SessionStore {
 
     pub(crate) fn get_all(&self) -> HashMap<String, Session> {
         self.sessions.read().clone()
+    }
+
+    /// Stamp `titleSetAt = now_ms` on every session that has a user-meaningful
+    /// (non-auto) title but no stamp yet, treating it as user-owned as of now,
+    /// so a stale `custom-title` in a provider log can't revert such a title on
+    /// the next re-extraction. Already-stamped and auto-titled sessions are left
+    /// untouched. The caller guards this to run exactly once, so freshly
+    /// imported sessions (whose `/rename` must still win) are never re-stamped.
+    /// Returns the count stamped.
+    pub(crate) fn backfill_title_set_at(&self, now_ms: i64) -> usize {
+        // Collect targets under a read lock, then update() each without holding
+        // it (update() takes the write lock itself).
+        let targets: Vec<String> = {
+            let sessions = self.sessions.read();
+            sessions
+                .values()
+                .filter(|s| needs_title_set_at_backfill(&s.title, &s.provider_data))
+                .map(|s| s.id.clone())
+                .collect()
+        };
+        let mut stamped = 0;
+        for id in &targets {
+            let update = SessionUpdate {
+                provider_data: Some(serde_json::json!({ "titleSetAt": now_ms })),
+                ..Default::default()
+            };
+            if self.update(id, update).is_ok() {
+                stamped += 1;
+            }
+        }
+        stamped
     }
 
     pub(crate) fn get(&self, id: &str) -> Option<Session> {
