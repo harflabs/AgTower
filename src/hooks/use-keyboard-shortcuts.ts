@@ -358,7 +358,8 @@ export function useKeyboardShortcuts(
 
         if (needsCtrl) {
           // Ctrl-specific chord: require the physical Control key without Cmd,
-          // so it never overlaps a Cmd shortcut or the macOS Cmd+Tab switcher.
+          // so it never matches a Cmd-based chord (meta shortcuts accept either
+          // Ctrl or Cmd; this one must not).
           if (!e.ctrlKey || e.metaKey) return false;
         } else if (needsMeta !== isMeta) {
           return false;
