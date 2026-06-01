@@ -161,10 +161,13 @@ pub(crate) fn write_terminal(
     // own `UserPromptSubmit` hook that gets here first in practice, but
     // this write_terminal path is a harmless no-op for it either way.
     //
-    // Heuristic: only flip on writes containing `\r`/`\n` (Enter) and never
-    // on ESC-prefixed writes (mouse, focus reporting, arrow keys, function
-    // keys — all start with `\x1b[` and don't carry a newline).
-    let has_submission = data.contains(&b'\r') || data.contains(&b'\n');
+    // Heuristic: only flip on a carriage return (`\r` = Enter in raw mode) and
+    // never on ESC-prefixed writes (mouse, focus reporting, arrow keys, function
+    // keys — all start with `\x1b[`). We deliberately do NOT treat a bare `\n` as
+    // a submission: a multi-line paste is newline-delimited and would otherwise
+    // false-flip an idle session to Running. Bracketed-paste payloads start
+    // with ESC and are excluded below.
+    let has_submission = data.contains(&b'\r');
     let starts_with_esc = matches!(data.first(), Some(&0x1B));
     if !has_submission || starts_with_esc {
         return Ok(());
@@ -241,34 +244,18 @@ pub(crate) fn resume_pty_reading(
 #[tauri::command]
 pub(crate) fn set_session_focused(
     state: State<'_, AppState>,
-    app: AppHandle,
+    _app: AppHandle,
     session_id: String,
     focused: bool,
 ) -> Result<(), String> {
-    // 1. Tell Codex about the terminal's focus state so its own notification
-    //    gate opens when the user isn't looking.
+    // Tell Codex about the terminal's focus state so its own notification gate
+    // opens when the user isn't looking.
+    //
+    // We deliberately do NOT treat focus as acknowledgment of a NeedsAttention
+    // session. Merely opening a blocked session to see what it's asking must
+    // not drop it from the triage queue — that silently loses "I peeked but
+    // didn't deal with it" items. The status clears only on a real reply
+    // (`write_terminal` flips to Running) or an explicit stop/archive.
     state.pty.send_focus_event(&session_id, focused)?;
-
-    // 2. Treat "the user focused this session" as an implicit acknowledgment
-    //    of any outstanding NeedsAttention. If they open the session and don't
-    //    reply, we transition to Idle so the sidebar badge clears. If they
-    //    actually reply, the provider's `UserPromptSubmit` hook (Claude) or
-    //    the Enter-driven flip in `write_terminal` (Codex) will push Running.
-    if focused {
-        if let Some(engine) = app.try_state::<Arc<Engine>>() {
-            if let Some(session) = engine.sessions.get(&session_id) {
-                if session.status == SessionStatus::NeedsAttention {
-                    let _ = engine.sessions.update(
-                        &session_id,
-                        SessionUpdate {
-                            status: Some(SessionStatus::Idle),
-                            ..Default::default()
-                        },
-                    );
-                }
-            }
-        }
-    }
-
     Ok(())
 }

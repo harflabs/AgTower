@@ -118,9 +118,23 @@ impl Engine {
         // stored PID is no longer alive to `closed`.
         self.sessions.recover_sessions();
 
-        // Auto-archive stale closed sessions
+        // Auto-archive stale closed sessions at startup...
         let archive_days = self.settings.read().archive_after_days;
         self.sessions.auto_archive_stale(archive_days);
+
+        // ...and again on an interval, so a long-running app doesn't accumulate
+        // un-archived closed sessions until the next restart. Reads the
+        // current setting each pass so a changed `archiveAfterDays` takes effect.
+        let sessions = self.sessions.clone();
+        let settings = self.settings.clone();
+        std::thread::Builder::new()
+            .name("agtower-auto-archive".into())
+            .spawn(move || loop {
+                std::thread::sleep(std::time::Duration::from_secs(3600));
+                let days = settings.read().archive_after_days;
+                sessions.auto_archive_stale(days);
+            })
+            .ok();
 
         Ok(())
     }

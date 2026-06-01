@@ -7,10 +7,12 @@ export type StartupBehavior = "dashboard" | "restore";
 export type SessionSortOrder = "recent" | "createdAt" | "oldest" | "title" | "status";
 export type WorkspaceSortOrder = "manual" | "recent" | "createdAt" | "alphabetical";
 
-interface NotificationSettings {
+export interface NotificationSettings {
   desktop: boolean;
   inApp: boolean;
   sound: boolean;
+  /** When true, suppress all attention and completion notifications. */
+  doNotDisturb?: boolean;
 }
 
 /** Per-provider settings (each provider stores its own key-value pairs) */
@@ -67,7 +69,7 @@ export const useSettingsStore = create<SettingsState>()(
         sidebarProviderFilter: "",
         sessionSortOrder: "recent",
         workspaceSortOrder: "manual",
-        notifications: { desktop: true, inApp: true, sound: true },
+        notifications: { desktop: true, inApp: true, sound: true, doNotDisturb: false },
         startupBehavior: "dashboard",
         theme: "system",
         archiveAfterDays: 7,

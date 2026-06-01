@@ -20,16 +20,10 @@ export async function setupEngineSync(): Promise<() => void> {
 
   // ── Session events ──
   const u1 = await listen<Session>("session:updated", (event) => {
-    // Detect active → closed transitions for dashboard toast
-    const prev = useSessionStore.getState().sessions[event.payload.id];
-    const wasActive =
-      prev &&
-      (prev.status === "running" || prev.status === "idle" || prev.status === "needsAttention");
-    const isNowClosed = event.payload.status === "closed";
-    if (wasActive && isNowClosed) {
-      notifySessionCompleted(event.payload as Session);
-    }
-
+    // Completion notifications are emitted authoritatively by the engine via
+    // `notification:completed` (see below) — NOT inferred here from a store diff,
+    // which raced with the optimistic close in the Terminated handler and dropped
+    // the toast.
     useSessionStore.getState()._updateFromEngine(event.payload.id, event.payload);
   });
   unlisteners.push(u1);
@@ -70,6 +64,14 @@ export async function setupEngineSync(): Promise<() => void> {
     notifyNeedsAttention(event.payload);
   });
   unlisteners.push(u8);
+
+  // Authoritative completion event from the engine (active → closed edge). Fires
+  // exactly once, regardless of whether the close came from a hook, PTY EOF, or
+  // an optimistic client write.
+  const u9 = await listen<Session>("notification:completed", (event) => {
+    notifySessionCompleted(event.payload);
+  });
+  unlisteners.push(u9);
 
   return () => {
     for (const u of unlisteners) u();

@@ -8,6 +8,7 @@ import { Terminal } from "@xterm/xterm";
 import { FileDown } from "lucide-react";
 import { forwardRef, useEffect, useImperativeHandle, useRef, useState } from "react";
 import { toast } from "sonner";
+import { confirmDestructiveAction } from "@/lib/native-dialog";
 // xterm.css is bundled via src/index.css (see the @import there), not here —
 // see the note in src/index.css for why a JS import broke prod CSS ordering.
 
@@ -900,6 +901,32 @@ export const SessionTerminal = forwardRef<SessionTerminalHandle, Props>(function
         });
       } else {
         const currentSession = useSessionStore.getState().sessions[sessionId] ?? session;
+
+        // Don't silently resurrect an ARCHIVED session on mere navigation — that
+        // would spawn a process, spend tokens, and un-archive it behind the
+        // user's back, bypassing the engine's "archived is terminal" guard.
+        // Archived sessions must be explicitly unarchived to resume.
+        if (currentSession.status === "archived") {
+          toast.info(`"${currentSession.title}" is archived. Unarchive it to resume.`);
+          onTerminatedRef.current?.({ code: null, signal: null, requestedByUser: true });
+          return;
+        }
+
+        // A finished (closed) session must not silently relaunch the agent on a
+        // mere click — make resume an explicit choice.
+        if (currentSession.status === "closed") {
+          const ok = await confirmDestructiveAction({
+            title: "Resume this session?",
+            message: "This session has ended. Resuming restarts the agent and may use tokens.",
+            okLabel: "Resume",
+          });
+          if (mountDisposed) return;
+          if (!ok) {
+            onTerminatedRef.current?.({ code: null, signal: null, requestedByUser: true });
+            return;
+          }
+        }
+
         const launchInTmux = useSettingsStore.getState().launchInTmux;
 
         // Pre-flight: if we're resuming, make sure the provider still has the

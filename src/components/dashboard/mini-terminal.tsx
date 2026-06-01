@@ -70,6 +70,31 @@ function getMiniTheme() {
   return document.documentElement.classList.contains("dark") ? THEME_DARK : THEME_LIGHT;
 }
 
+// Shared theme-change notifier: ONE MutationObserver on <html> for all mini
+// terminals, instead of each card registering its own observer that then fires
+// for every class change on the document.
+const themeListeners = new Set<() => void>();
+let sharedThemeObserver: MutationObserver | null = null;
+function subscribeThemeChange(cb: () => void): () => void {
+  themeListeners.add(cb);
+  if (!sharedThemeObserver && typeof document !== "undefined") {
+    sharedThemeObserver = new MutationObserver(() => {
+      for (const l of themeListeners) l();
+    });
+    sharedThemeObserver.observe(document.documentElement, {
+      attributes: true,
+      attributeFilter: ["class"],
+    });
+  }
+  return () => {
+    themeListeners.delete(cb);
+    if (themeListeners.size === 0 && sharedThemeObserver) {
+      sharedThemeObserver.disconnect();
+      sharedThemeObserver = null;
+    }
+  };
+}
+
 // ── Constants ──────────────────────────────────────────────────────
 const FONT = 'Menlo, "Geeza Pro", Monaco, "Courier New", monospace';
 const SCROLLBACK = 200;
@@ -357,9 +382,11 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
         el.clientHeight >= 10 &&
         snapshot.data.length > 0
       ) {
-        console.warn(
-          `[mini-terminal] row mismatch for ${sessionId}: term has ${term.rows} rows but snapshot targets ${snapshot.rows} — preview may render garbled`,
-        );
+        // Geometry drifted between syncGeometryFromDims above and here (e.g. a
+        // resize raced in). Force the terminal to the snapshot's grid so the TUI's
+        // absolute-cursor sequences land on the right rows instead of piling onto
+        // the bottom — correct it rather than just warning.
+        term.resize(Math.max(snapshot.cols, 1), Math.max(snapshot.rows, 1));
       }
       term.reset();
 
@@ -463,12 +490,8 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
     );
     io.observe(el);
 
-    // Watch for light/dark theme changes on <html>
-    const themeObserver = new MutationObserver(() => syncTheme());
-    themeObserver.observe(document.documentElement, {
-      attributes: true,
-      attributeFilter: ["class"],
-    });
+    // Watch for light/dark theme changes on <html> via the shared observer.
+    const unsubscribeTheme = subscribeThemeChange(() => syncTheme());
 
     const fallback = setTimeout(() => {
       if (!disposed && isVisible && !term) {
@@ -487,7 +510,7 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
       clearVisibleSubscription();
       ro.disconnect();
       io.disconnect();
-      themeObserver.disconnect();
+      unsubscribeTheme();
       term?.dispose();
       container?.remove();
     };

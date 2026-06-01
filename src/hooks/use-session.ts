@@ -249,32 +249,39 @@ export function useSession() {
     [updateSession],
   );
 
-  const stopAllSessions = useCallback(async () => {
-    const allSessions = useSessionStore.getState().sessions;
-    const running = Object.values(allSessions).filter((s) => ACTIVE_SESSION_STATUSES.has(s.status));
-    if (running.length === 0) return;
+  const stopAllSessions = useCallback(
+    async (repoId?: string | null) => {
+      // Scope to the active workspace filter when provided, so a filtered dashboard
+      // doesn't silently stop sessions in other workspaces.
+      const allSessions = useSessionStore.getState().sessions;
+      const running = Object.values(allSessions).filter(
+        (s) => ACTIVE_SESSION_STATUSES.has(s.status) && (!repoId || s.repoId === repoId),
+      );
+      if (running.length === 0) return;
 
-    const confirmed = await confirmDestructiveAction({
-      title: running.length === 1 ? "Stop active session?" : `Stop ${running.length} sessions?`,
-      message:
-        running.length === 1
-          ? "This will terminate the active agent process and move the session to Closed."
-          : "This will terminate every active agent process and move those sessions to Closed.",
-      okLabel: "Stop",
-    });
-    if (!confirmed) return;
+      const confirmed = await confirmDestructiveAction({
+        title: running.length === 1 ? "Stop active session?" : `Stop ${running.length} sessions?`,
+        message:
+          running.length === 1
+            ? "This will terminate the active agent process and move the session to Closed."
+            : "This will terminate every active agent process and move those sessions to Closed.",
+        okLabel: "Stop",
+      });
+      if (!confirmed) return;
 
-    const endedAt = Date.now();
-    await Promise.allSettled(
-      running.map((s) =>
-        invoke("kill_pty_session", { sessionId: s.id })
-          .catch(() => {})
-          .then(() => {
-            updateSession(s.id, { status: "closed", endedAt });
-          }),
-      ),
-    );
-  }, [updateSession]);
+      const endedAt = Date.now();
+      await Promise.allSettled(
+        running.map((s) =>
+          invoke("kill_pty_session", { sessionId: s.id })
+            .catch(() => {})
+            .then(() => {
+              updateSession(s.id, { status: "closed", endedAt });
+            }),
+        ),
+      );
+    },
+    [updateSession],
+  );
 
   const stopSessionsInRepo = useCallback(
     async (repoId: string) => {

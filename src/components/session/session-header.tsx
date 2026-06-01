@@ -277,7 +277,10 @@ function SessionToolbarBody({
         >
           <StatusDot
             status={model.session.status}
-            className={cn("size-2 shrink-0", model.isRunning && "animate-pulse-dot")}
+            className={cn(
+              "size-2 shrink-0",
+              model.session.status === "running" && "animate-pulse-dot",
+            )}
           />
 
           <Breadcrumb

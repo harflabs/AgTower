@@ -48,8 +48,13 @@ pub(crate) fn create_session(
 pub(crate) fn update_session(
     engine: State<'_, Arc<Engine>>,
     id: String,
-    updates: SessionUpdate,
+    mut updates: SessionUpdate,
 ) -> Result<(), String> {
+    // Client writes are trusted to perform legitimate terminal-state exits
+    // (resume/restart move a closed/archived session back to active). Bypass the
+    // engine's transition guard; that guard exists to protect internal
+    // Rust callers from accidental bad transitions, not the trusted client.
+    updates.force_status = true;
     engine.sessions.update(&id, updates)
 }
 
