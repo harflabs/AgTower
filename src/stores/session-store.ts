@@ -148,7 +148,13 @@ export const useSessionStore = create<SessionState>()(
             existing.status === "idle" ||
             existing.status === "needsAttention";
           if (wasActive) {
-            invoke("kill_pty_session", { sessionId: id }).catch(() => {});
+            // Log kill failures so an orphaned PTY is at least observable. We
+            // don't toast — a kill commonly "fails" simply because the PTY has
+            // already exited, which isn't worth alarming the user about (this
+            // matches stopSession's console.warn handling of the same call).
+            invoke("kill_pty_session", { sessionId: id }).catch((err) => {
+              console.warn("[archive] PTY kill failed:", err);
+            });
           }
           const updated = {
             ...existing,

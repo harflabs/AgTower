@@ -39,11 +39,20 @@ function isSessionCurrentlyVisible(sessionId: string): boolean {
  * across attention + completion so the two don't double-ding.
  */
 const NOTIFY_COOLDOWN_MS = 8000;
+// Prune the cooldown map once it grows past this; entries older than the
+// cooldown window are no longer relevant, so the map stays bounded even for a
+// long-running app that churns through many short-lived sessions.
+const NOTIFY_MAP_PRUNE_THRESHOLD = 256;
 const lastNotifiedAt = new Map<string, number>();
 function withinNotifyCooldown(sessionId: string): boolean {
   const now = Date.now();
   const last = lastNotifiedAt.get(sessionId);
   if (last !== undefined && now - last < NOTIFY_COOLDOWN_MS) return true;
+  if (lastNotifiedAt.size > NOTIFY_MAP_PRUNE_THRESHOLD) {
+    for (const [id, ts] of lastNotifiedAt) {
+      if (now - ts >= NOTIFY_COOLDOWN_MS) lastNotifiedAt.delete(id);
+    }
+  }
   lastNotifiedAt.set(sessionId, now);
   return false;
 }
