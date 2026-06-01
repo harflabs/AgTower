@@ -60,7 +60,7 @@ export default function Dashboard() {
     return {
       attentionCount,
       kind: "dashboard" as const,
-      onStopAll: runningCount > 0 ? stopAllSessions : undefined,
+      onStopAll: runningCount > 0 ? () => stopAllSessions(workspaceFilter) : undefined,
       onWorkspaceFilterChange: setWorkspaceFilter,
       runningCount,
       title: "Dashboard",
@@ -132,7 +132,7 @@ export default function Dashboard() {
                 ? {
                     label: "Stop All",
                     icon: OctagonX,
-                    onClick: stopAllSessions,
+                    onClick: () => stopAllSessions(workspaceFilter),
                     variant: "destructive",
                   }
                 : undefined

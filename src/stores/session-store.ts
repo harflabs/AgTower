@@ -32,6 +32,10 @@ interface SessionRecord {
   gitBranch: string | null;
   stopReason: string | null;
   provider: ProviderType;
+  /** Monotonic engine revision; lets the client drop out-of-order emits. */
+  rev?: number;
+  /** Last time the session became active; drives dashboard recency ordering. */
+  lastActivityAt?: number;
 }
 
 /** Transient live data — memory-only, never persisted to DB */
@@ -134,10 +138,29 @@ export const useSessionStore = create<SessionState>()(
         set((s) => {
           const existing = s.sessions[id];
           if (!existing) return s;
+          // Archiving an ACTIVE session must terminate its PTY first, or the
+          // agent keeps running invisibly — archived sessions aren't shown on the
+          // kanban/sidebar and expose no Stop action, so the PTY would be orphaned
+          // and unkillable. stopSession/restartSession already kill the PTY before
+          // transitioning; archive must do the same.
+          const wasActive =
+            existing.status === "running" ||
+            existing.status === "idle" ||
+            existing.status === "needsAttention";
+          if (wasActive) {
+            // Log kill failures so an orphaned PTY is at least observable. We
+            // don't toast — a kill commonly "fails" simply because the PTY has
+            // already exited, which isn't worth alarming the user about (this
+            // matches stopSession's console.warn handling of the same call).
+            invoke("kill_pty_session", { sessionId: id }).catch((err) => {
+              console.warn("[archive] PTY kill failed:", err);
+            });
+          }
           const updated = {
             ...existing,
             status: "archived" as SessionStatus,
             endedAt: existing.endedAt ?? Date.now(),
+            ptyActive: false,
           };
           invoke("archive_session", { id }).catch(toastError("archive session"));
           return {
@@ -150,8 +173,31 @@ export const useSessionStore = create<SessionState>()(
           if (!s._hydrated) return s; // Guard: wait for initial hydration
           const existing = s.sessions[id];
           if (!existing) return s;
+          // Drop out-of-order engine emits: a strictly lower rev than what we
+          // already hold is stale and would clobber newer state.
+          if (
+            typeof session.rev === "number" &&
+            typeof existing.rev === "number" &&
+            session.rev < existing.rev
+          ) {
+            return s;
+          }
+          const merged = { ...existing, ...session };
+          // Guard against a stale full-snapshot emit reverting a fresher
+          // optimistic terminal status. If we've locally moved a session to
+          // closed/archived but an in-flight engine emit still carries an active
+          // status (Rust hadn't processed our close yet), don't let the wholesale
+          // merge resurrect it.
+          const existingTerminal = existing.status === "closed" || existing.status === "archived";
+          const incomingActive =
+            session.status === "running" ||
+            session.status === "idle" ||
+            session.status === "needsAttention";
+          if (existingTerminal && incomingActive) {
+            merged.status = existing.status;
+          }
           return {
-            sessions: { ...s.sessions, [id]: { ...existing, ...session } },
+            sessions: { ...s.sessions, [id]: merged },
           };
         }),
       _addFromEngine: (session) =>

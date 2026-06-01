@@ -4,27 +4,19 @@ import { Badge } from "@/components/ui/badge";
 import { IconButton } from "@/components/ui/icon-button";
 import { createContextMenuHandler, type NativeMenuItemSpec } from "@/lib/native-menu";
 import type { KanbanColumnKey } from "@/lib/session-helpers";
+import { statusDotClass } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
+import type { SessionStatus } from "@/types/session";
 
-const COLUMN_CONFIG: Record<
-  KanbanColumnKey,
-  {
-    badgeClass: string;
-    dotClass: string;
-  }
-> = {
-  running: {
-    badgeClass: "border-border/70 bg-background/70 text-muted-foreground",
-    dotClass: "bg-success",
-  },
-  attention: {
-    badgeClass: "border-border/70 bg-background/70 text-muted-foreground",
-    dotClass: "bg-warning",
-  },
-  idle: {
-    badgeClass: "border-border/70 bg-background/70 text-muted-foreground",
-    dotClass: "bg-muted-foreground/50",
-  },
+const BADGE_CLASS = "border-border/70 bg-background/70 text-muted-foreground";
+
+// Map each column to its representing status so the dot color comes from the one
+// canonical status→color map in status-icons.tsx, keeping the running/idle/
+// attention colors consistent with the sidebar and cards.
+const COLUMN_STATUS: Record<KanbanColumnKey, SessionStatus> = {
+  running: "running",
+  attention: "needsAttention",
+  idle: "idle",
 };
 
 interface KanbanColumnProps {
@@ -41,8 +33,6 @@ interface KanbanColumnProps {
 }
 
 export function KanbanColumn({ columnKey, label, count, action, children }: KanbanColumnProps) {
-  const config = COLUMN_CONFIG[columnKey];
-
   const handleHeaderContextMenu = createContextMenuHandler(() => {
     if (!action || count === 0) return [];
     const specs: NativeMenuItemSpec[] = [
@@ -59,14 +49,16 @@ export function KanbanColumn({ columnKey, label, count, action, children }: Kanb
         className="flex h-9 shrink-0 items-center gap-2 border-b border-border/50 px-3"
       >
         <div className="flex min-w-0 flex-1 items-center gap-2">
-          <span className={cn("size-2 shrink-0 rounded-full", config.dotClass)} />
+          <span
+            className={cn("size-2 shrink-0 rounded-full", statusDotClass(COLUMN_STATUS[columnKey]))}
+          />
           <span className="truncate text-[12px] font-medium text-foreground">{label}</span>
           {count > 0 && (
             <Badge
               variant="outline"
               className={cn(
                 "ml-1 h-5 shrink-0 rounded-md px-1.5 text-[10px] font-medium tabular-nums shadow-none",
-                config.badgeClass,
+                BADGE_CLASS,
               )}
             >
               {count}

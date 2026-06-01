@@ -1,14 +1,16 @@
 import { AlertTriangle, Archive, Bot, GitBranch, GitPullRequest, RotateCcw } from "lucide-react";
 import { motion } from "motion/react";
-import { useEffect, useState } from "react";
+import { memo } from "react";
 import { useNavigate } from "react-router";
 import { MiniTerminal } from "@/components/dashboard/mini-terminal";
 import { ProviderIcon } from "@/components/icons/provider-icon";
 import { StopIcon } from "@/components/icons/stop-icon";
 import { IconButton } from "@/components/ui/icon-button";
+import { useNow } from "@/hooks/use-now";
 import { createContextMenuHandler, type NativeMenuItemSpec } from "@/lib/native-menu";
 import type { KanbanColumnKey } from "@/lib/session-helpers";
 import { formatDuration, formatModelName } from "@/lib/session-helpers";
+import { statusDotClass } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
 import { useRepoStore } from "@/stores/repo-store";
 import type { Session } from "@/stores/session-store";
@@ -28,9 +30,13 @@ interface ActionConfig {
   destructive?: boolean;
 }
 
-export function SessionCard({ session, columnKey, onStop, onRestart }: SessionCardProps) {
+export const SessionCard = memo(function SessionCard({
+  session,
+  columnKey,
+  onStop,
+  onRestart,
+}: SessionCardProps) {
   const navigate = useNavigate();
-  const [elapsed, setElapsed] = useState(0);
   const repoColor = useRepoStore((s) => s.repos[session.repoId]?.color);
 
   const isRunning =
@@ -38,14 +44,13 @@ export function SessionCard({ session, columnKey, onStop, onRestart }: SessionCa
     session.status === "needsAttention" ||
     session.status === "idle";
 
-  useEffect(() => {
-    if (!isRunning) return;
-    setElapsed(Date.now() - session.createdAt);
-    const interval = setInterval(() => setElapsed(Date.now() - session.createdAt), 1000);
-    return () => clearInterval(interval);
-  }, [isRunning, session.createdAt]);
-
-  const duration = isRunning ? elapsed : (session.durationMs ?? 0);
+  // A single shared 1s clock drives the live duration, and only a genuinely
+  // running agent ticks — idle/needsAttention sessions aren't working, so an
+  // ever-growing wall-clock would misrepresent them. Finished sessions show
+  // their final recorded duration.
+  const isActivelyRunning = session.status === "running";
+  const now = useNow(isActivelyRunning);
+  const duration = isActivelyRunning ? now - session.createdAt : (session.durationMs ?? 0);
 
   const handleOpen = async () => {
     useRepoStore.getState().setActiveRepo(session.repoId);
@@ -57,8 +62,13 @@ export function SessionCard({ session, columnKey, onStop, onRestart }: SessionCa
 
   const isAttention = columnKey === "attention";
   const isIdle = columnKey === "idle";
-  const isErrored = isAttention && session.exitCode !== null && session.exitCode !== 0;
-  const attentionReason = isAttention && isErrored ? session.error || "Session errored" : null;
+  // Surface a captured error reason on attention cards regardless of exitCode: a
+  // PTY-launch failure sets `error` but leaves exitCode null, so gating the
+  // banner on a non-zero exitCode would never show it for a live attention card.
+  const errorReason = session.error?.trim() || null;
+  const isErrored =
+    isAttention && (errorReason !== null || (session.exitCode !== null && session.exitCode !== 0));
+  const attentionReason = isAttention ? errorReason : null;
 
   const statsSummary = [
     session.numTurns != null && session.numTurns > 0 ? `${session.numTurns} turns` : null,
@@ -134,13 +144,20 @@ export function SessionCard({ session, columnKey, onStop, onRestart }: SessionCa
         <div>
           <div className="mb-1.5 flex items-center gap-1.5">
             {columnKey === "running" ? (
-              <span className="size-2 shrink-0 rounded-full bg-success animate-pulse-dot" />
+              <span
+                className={cn(
+                  "size-2 shrink-0 rounded-full animate-pulse-dot",
+                  statusDotClass("running"),
+                )}
+              />
             ) : isAttention ? (
               <AlertTriangle
                 className={cn("size-3.5 shrink-0", isErrored ? "text-destructive" : "text-warning")}
               />
             ) : (
-              <span className="size-2 shrink-0 rounded-full bg-muted-foreground/60" />
+              <span
+                className={cn("size-2 shrink-0 rounded-full", statusDotClass(session.status))}
+              />
             )}
 
             <span className="min-w-0 flex-1 truncate text-primary-info">{session.title}</span>
@@ -208,7 +225,7 @@ export function SessionCard({ session, columnKey, onStop, onRestart }: SessionCa
       </div>
     </motion.div>
   );
-}
+});
 
 function ContextIndicators({ session }: { session: Session }) {
   const agentName = session.providerData?.agentName as string | undefined;

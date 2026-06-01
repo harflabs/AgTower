@@ -192,6 +192,8 @@ mod tests {
                 None => json!({}),
             },
             live_provider_data: json!({}),
+            rev: 0,
+            last_activity_at: created_at,
         }
     }
 
@@ -603,6 +605,15 @@ pub(crate) struct Session {
     /// Provider-specific transient live state (never persisted to DB).
     /// Deep-merged on updates, same as provider_data.
     pub live_provider_data: Value,
+    /// In-memory monotonic revision, bumped on every `update()` before the emit.
+    /// Lets the client drop out-of-order engine emits. Not persisted.
+    #[serde(default)]
+    pub rev: i64,
+    /// Last time the session became active (transition into Running). Drives
+    /// recency ordering on the dashboard. In-memory; seeded to
+    /// `created_at` on load and on add.
+    #[serde(default)]
+    pub last_activity_at: i64,
 }
 
 impl Session {
@@ -641,6 +652,11 @@ pub(crate) struct SessionUpdate {
     pub provider_data: Option<Value>,
     /// Provider-specific transient live state update. Deep-merged.
     pub live_provider_data: Option<Value>,
+    /// Bypass the terminal-state transition guard in `update()`. Set by
+    /// trusted paths that legitimately exit a terminal state (the update_session
+    /// command, archive, auto-archive). Never sent by the agent hook path.
+    #[serde(default)]
+    pub force_status: bool,
 }
 
 /// Keys that are transient and should never trigger a DB save.
@@ -819,7 +835,12 @@ impl SessionStore {
         self.sessions.read().get(id).cloned()
     }
 
-    pub(crate) fn add(&self, session: Session) -> Result<(), String> {
+    pub(crate) fn add(&self, mut session: Session) -> Result<(), String> {
+        // Seed activity time so a freshly created session sorts sensibly before
+        // its first status transition.
+        if session.last_activity_at <= 0 {
+            session.last_activity_at = session.created_at;
+        }
         // Atomic dedup + insert under a single write lock.
         // Prevents the TOCTOU race where two threads both pass the dedup check
         // and insert duplicate sessions with the same provider_data.sessionId.
@@ -845,7 +866,7 @@ impl SessionStore {
         Ok(())
     }
 
-    pub(crate) fn update(&self, id: &str, updates: SessionUpdate) -> Result<(), String> {
+    pub(crate) fn update(&self, id: &str, mut updates: SessionUpdate) -> Result<(), String> {
         let provider_session_id_touched = updates
             .provider_data
             .as_ref()
@@ -857,6 +878,21 @@ impl SessionStore {
         let session = sessions.get_mut(id).ok_or("Session not found")?;
 
         let old_status = session.status;
+
+        // Centralized transition guard: a non-forced status change may not
+        // leave a terminal state — Archived is permanent, and Closed only accepts
+        // Closed again. Legitimate terminal exits (client resume/restart via the
+        // update_session command, archive, auto-archive) set `force_status`. Agent
+        // hook pushes are pre-validated in control_socket::next_status_update. Any
+        // other fields in the same update still apply; only the status is dropped.
+        if let Some(next) = updates.status {
+            if !updates.force_status
+                && (old_status == SessionStatus::Archived
+                    || (old_status == SessionStatus::Closed && next != SessionStatus::Closed))
+            {
+                updates.status = None;
+            }
+        }
 
         // Snapshot for rollback: apply_updates mutates in place, but the DB write
         // can fail (locked DB, disk full). Without rollback, memory would hold the
@@ -870,6 +906,15 @@ impl SessionStore {
                 *session = rollback;
                 return Err(e.to_string());
             }
+        }
+
+        // Bump the monotonic revision so the client can drop out-of-order emits,
+        // and stamp activity time on a transition into Running.
+        session.rev += 1;
+        if matches!(updates.status, Some(SessionStatus::Running))
+            && old_status != SessionStatus::Running
+        {
+            session.last_activity_at = crate::engine::epoch_ms();
         }
 
         let updated = session.clone();
@@ -891,6 +936,14 @@ impl SessionStore {
             if is_attention && !was_attention {
                 self.emit("notification:attention", &updated);
             }
+        }
+
+        // Authoritative completion event on the active -> closed edge. The
+        // toast/sound fire from this engine event (mirroring notification:attention)
+        // rather than being inferred from client store-diffs, which race with the
+        // optimistic close in the Terminated handler and silently drop the toast.
+        if old_status.is_active() && new_status == SessionStatus::Closed {
+            self.emit("notification:completed", &updated);
         }
 
         // Auto-extract provider metadata. Two triggers, two scopes:
@@ -1085,6 +1138,7 @@ impl SessionStore {
             SessionUpdate {
                 status: Some(SessionStatus::Archived),
                 ended_at: Some(Some(epoch_ms())),
+                force_status: true,
                 ..Default::default()
             },
         )
@@ -1113,6 +1167,7 @@ impl SessionStore {
                 &id,
                 SessionUpdate {
                     status: Some(SessionStatus::Archived),
+                    force_status: true,
                     ..Default::default()
                 },
             ) {
@@ -1191,6 +1246,8 @@ fn session_from_row(row: SessionRow) -> Session {
         provider_data,
         // Transient defaults
         live_provider_data: serde_json::json!({}),
+        rev: 0,
+        last_activity_at: row.created_at,
     }
 }
 

@@ -4,6 +4,7 @@ import {
   Archive,
   ArrowLeft,
   Bell,
+  BellOff,
   BellRing,
   Cpu,
   DatabaseZap,
@@ -544,6 +545,27 @@ export default function Settings() {
                   id="sound-notifications"
                   checked={notifications.sound}
                   onCheckedChange={(checked) => void handleNotificationSoundChange(checked)}
+                />
+              </div>
+
+              <div className={SETTINGS_ROW_CLASS_NAME}>
+                <div className="flex items-center gap-3">
+                  <BellOff className={SETTINGS_ROW_ICON_CLASS_NAME} />
+                  <div>
+                    <Label htmlFor="do-not-disturb" className="text-sm font-medium">
+                      Do Not Disturb
+                    </Label>
+                    <p className="text-sm text-muted-foreground">
+                      Mute all agent notifications, toasts, and sounds
+                    </p>
+                  </div>
+                </div>
+                <Switch
+                  id="do-not-disturb"
+                  checked={notifications.doNotDisturb ?? false}
+                  onCheckedChange={(checked) =>
+                    useSettingsStore.getState().setNotifications({ doNotDisturb: checked })
+                  }
                 />
               </div>
             </div>

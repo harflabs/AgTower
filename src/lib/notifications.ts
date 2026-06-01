@@ -9,7 +9,7 @@ import { HAS_TAURI_RUNTIME, IS_MACOS } from "@/lib/platform";
 import { formatDuration } from "@/lib/session-helpers";
 import type { Session } from "@/stores/session-store";
 import { useSessionStore } from "@/stores/session-store";
-import { useSettingsStore } from "@/stores/settings-store";
+import { type NotificationSettings, useSettingsStore } from "@/stores/settings-store";
 
 export async function requestNotificationPermission(): Promise<boolean> {
   let granted = await isPermissionGranted();
@@ -32,19 +32,104 @@ function isSessionCurrentlyVisible(sessionId: string): boolean {
   return document.hasFocus() && document.visibilityState === "visible";
 }
 
+/**
+ * Per-session notification cooldown. A multi-turn agent fires `Stop` on every
+ * turn boundary, so without throttling the user gets a ding per turn per agent.
+ * Suppress repeat notifications for the same session within the window. Shared
+ * across attention + completion so the two don't double-ding.
+ */
+const NOTIFY_COOLDOWN_MS = 8000;
+// Prune the cooldown map once it grows past this; entries older than the
+// cooldown window are no longer relevant, so the map stays bounded even for a
+// long-running app that churns through many short-lived sessions.
+const NOTIFY_MAP_PRUNE_THRESHOLD = 256;
+const lastNotifiedAt = new Map<string, number>();
+function withinNotifyCooldown(sessionId: string): boolean {
+  const now = Date.now();
+  const last = lastNotifiedAt.get(sessionId);
+  if (last !== undefined && now - last < NOTIFY_COOLDOWN_MS) return true;
+  if (lastNotifiedAt.size > NOTIFY_MAP_PRUNE_THRESHOLD) {
+    for (const [id, ts] of lastNotifiedAt) {
+      if (now - ts >= NOTIFY_COOLDOWN_MS) lastNotifiedAt.delete(id);
+    }
+  }
+  lastNotifiedAt.set(sessionId, now);
+  return false;
+}
+
 export function notifyNeedsAttention(session: Session) {
   // Only notify if session status is needsAttention
   if (session.status !== "needsAttention") return;
 
-  // Don't pester the user about a session they're already looking at — the
-  // `set_session_focused` backend command will transition it to Idle in
-  // short order anyway.
+  // Don't pester the user about a session they're already looking at.
   if (isSessionCurrentlyVisible(session.id)) return;
+
+  // Throttle per-turn spam across non-focused agents.
+  if (withinNotifyCooldown(session.id)) return;
+
+  if (useSettingsStore.getState().notifications.doNotDisturb) return;
 
   // Increment unseen counter for dashboard badge
   useSessionStore.getState().incrementUnseen();
 
+  // Coalesce bursts: many agents going blocked within a short window collapse
+  // into a single toast + sound instead of N separate dings.
+  enqueueAttention(session);
+}
+
+const ATTENTION_COALESCE_MS = 600;
+let attentionBatch: Session[] = [];
+let attentionTimer: ReturnType<typeof setTimeout> | null = null;
+
+function enqueueAttention(session: Session) {
+  attentionBatch.push(session);
+  if (attentionTimer) return;
+  attentionTimer = setTimeout(flushAttention, ATTENTION_COALESCE_MS);
+}
+
+function flushAttention() {
+  attentionTimer = null;
+  const batch = attentionBatch;
+  attentionBatch = [];
+  if (batch.length === 0) return;
+
   const settings = useSettingsStore.getState().notifications;
+  if (settings.doNotDisturb) return;
+
+  if (batch.length === 1) {
+    deliverAttention(batch[0], settings);
+    return;
+  }
+
+  // Coalesced burst: one notification + one sound for the whole group.
+  const isError = batch.some((s) => s.stopReason === "error");
+  const title = `${batch.length} agents need attention`;
+  const names = batch
+    .map((s) => s.title)
+    .slice(0, 4)
+    .join(", ");
+  const body = batch.length > 4 ? `${names}, +${batch.length - 4} more` : names;
+
+  if (settings.desktop) {
+    isPermissionGranted().then((granted) => {
+      if (granted) {
+        try {
+          sendNotification({ title, body });
+        } catch (err) {
+          console.error("[notifications] Failed to send notification:", err);
+        }
+      }
+    });
+  }
+  if (settings.inApp) {
+    (isError ? toast.error : toast.success)(title, { description: body, duration: 5000 });
+  }
+  if (settings.sound) {
+    playNotificationSound(isError);
+  }
+}
+
+function deliverAttention(session: Session, settings: NotificationSettings) {
   const isError = session.stopReason === "error";
   const title = isError ? "Agent needs attention" : "Agent waiting for input";
 
@@ -90,7 +175,13 @@ export function notifyNeedsAttention(session: Session) {
  * Show a brief toast when a session completes (vanishes from dashboard).
  */
 export function notifySessionCompleted(session: Session) {
+  // Match the attention path: don't ding for a session the user just watched
+  // finish, and throttle per-session.
+  if (isSessionCurrentlyVisible(session.id)) return;
+  if (withinNotifyCooldown(session.id)) return;
+
   const settings = useSettingsStore.getState().notifications;
+  if (settings.doNotDisturb) return;
   const title = session.title || "Session completed";
   const body = `${session.repoName} — Done`;
 

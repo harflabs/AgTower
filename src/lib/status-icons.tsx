@@ -14,6 +14,16 @@ const STATUS_DOT_CONFIG: Record<SessionStatus, StatusDotConfig> = {
   archived: { label: "Archived", dotClass: "bg-muted-foreground/60" },
 };
 
+/**
+ * Canonical status → dot color mapping, shared across the sidebar dot, the
+ * kanban column headers, and the dashboard cards so a given status reads as the
+ * same color everywhere: running = primary, needsAttention = warning, idle =
+ * muted, closed = success, archived = muted.
+ */
+export function statusDotClass(status: SessionStatus): string {
+  return STATUS_DOT_CONFIG[status].dotClass;
+}
+
 interface StatusDotProps {
   status: SessionStatus;
   className?: string;

@@ -84,6 +84,13 @@ fn sort_active_sessions(a: &Session, b: &Session) -> std::cmp::Ordering {
     if a_attention != b_attention {
         return b_attention.cmp(&a_attention);
     }
+    // Within the Active bucket, cluster Running ahead of Idle so the two read as
+    // distinct groups even though the sidebar shares one "Active" section.
+    let a_running = a.status == SessionStatus::Running;
+    let b_running = b.status == SessionStatus::Running;
+    if a_running != b_running {
+        return b_running.cmp(&a_running);
+    }
     last_activity(b).cmp(&last_activity(a))
 }
 
@@ -336,6 +343,9 @@ pub(crate) fn compute_sidebar_tree(
         .values()
         .filter(provider_matches)
         .filter(|session| !repos.contains_key(&session.repo_id))
+        // Exclude archived sessions here too, matching the normal-workspace path,
+        // so removing a repo doesn't resurface its archived sessions.
+        .filter(|session| session.status != SessionStatus::Archived)
     {
         missing_groups
             .entry(session.repo_id.clone())
@@ -505,6 +515,8 @@ mod tests {
             provider: "claude-code".to_string(),
             provider_data: json!({}),
             live_provider_data: json!({}),
+            rev: 0,
+            last_activity_at: 0,
         }
     }
 

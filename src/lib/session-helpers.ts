@@ -209,8 +209,12 @@ const COLUMN_LABELS: Record<KanbanColumnKey, string> = {
   idle: "Idle",
 };
 
-function sessionActivity(session: Session): number {
-  return session.endedAt ?? session.createdAt;
+/**
+ * Sort key for kanban columns. Active sessions have no `endedAt`, so they sort by
+ * `lastActivityAt` (most-recently-active first), falling back to `createdAt`.
+ */
+function sessionSortKey(session: Session): number {
+  return session.endedAt ?? session.lastActivityAt ?? session.createdAt;
 }
 
 /** Group active sessions into the three dashboard kanban columns. */
@@ -242,6 +246,6 @@ export function computeKanbanColumns(
   return order.map((key) => ({
     key,
     label: COLUMN_LABELS[key],
-    sessions: buckets[key].sort((a, b) => sessionActivity(b) - sessionActivity(a)),
+    sessions: buckets[key].sort((a, b) => sessionSortKey(b) - sessionSortKey(a)),
   }));
 }

@@ -1313,19 +1313,36 @@ export default function AppSidebar() {
     }
   }, [activeSessionId, sessions]);
 
+  const prevFocusableNodeIdsRef = useRef<string[]>(focusableNodeIds);
   useEffect(() => {
-    if (!sidebarFocusMode) return;
-    if (loading) return;
-    if (focusedNodeId && focusableNodeIds.some((nodeId) => nodeId === focusedNodeId)) return;
-    setFocusedNodeId(focusableNodeIds[0] ?? null);
+    if (!sidebarFocusMode || loading) {
+      prevFocusableNodeIdsRef.current = focusableNodeIds;
+      return;
+    }
+    if (focusedNodeId && focusableNodeIds.some((nodeId) => nodeId === focusedNodeId)) {
+      prevFocusableNodeIdsRef.current = focusableNodeIds;
+      return;
+    }
+    // The focused node left the visible set (closed into collapsed history,
+    // archived, or removed). Advance to the nearest surviving neighbor by its
+    // old position instead of jumping to the top of the sidebar.
+    const prev = prevFocusableNodeIdsRef.current;
+    const oldIndex = focusedNodeId ? prev.indexOf(focusedNodeId) : -1;
+    const next =
+      oldIndex >= 0 && focusableNodeIds.length > 0
+        ? (focusableNodeIds[Math.min(oldIndex, focusableNodeIds.length - 1)] ?? null)
+        : (focusableNodeIds[0] ?? null);
+    setFocusedNodeId(next);
+    prevFocusableNodeIdsRef.current = focusableNodeIds;
   }, [sidebarFocusMode, loading, focusedNodeId, focusableNodeIds, setFocusedNodeId]);
 
+  // biome-ignore lint/correctness/useExhaustiveDependencies: focusableNodeIds is an intentional re-run trigger so the focused row re-scrolls after the list re-sorts
   useEffect(() => {
     if (!sidebarFocusMode || !focusedNodeId) return;
     const element = nodeRefs.current.get(focusedNodeId);
     if (!element) return;
     focusSidebarNode(element);
-  }, [focusSidebarNode, focusedNodeId, sidebarFocusMode]);
+  }, [focusSidebarNode, focusedNodeId, sidebarFocusMode, focusableNodeIds]);
 
   useEffect(() => {
     function handleFocusTree() {
