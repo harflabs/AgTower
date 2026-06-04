@@ -140,10 +140,10 @@ interface PreviewDimensions {
  * MIN_FONT_SIZE for the typical 24–50 row TUI (re-clamping to the floor with no
  * effect), or would require reducing `term.rows`, which breaks the
  * row-matching invariant above. The card's `overflow:hidden` clips the
- * overflow, and `applyContentAnchor` (see the component) toggles the rendered
- * `.xterm` element between top- and bottom-anchored so the relevant rows stay
- * visible: bottom-anchored for full-grid alt-screen TUIs, top-anchored for
- * short normal-buffer content that would otherwise be clipped off the top.
+ * overflow, and `applyContentAnchor` (see the component) positions the rendered
+ * `.xterm` element so the relevant rows stay visible: bottom-anchored for
+ * full-grid alt-screen TUIs, content-tail-anchored for normal-buffer content
+ * (which may end anywhere in the grid, including mid-grid).
  */
 function fitPreview(cardW: number, cols: number, rows: number): PreviewDimensions {
   const ideal = cardW / (cols * CHAR_WIDTH_RATIO);
@@ -164,11 +164,12 @@ interface MiniTerminalProps {
  *
  * Renders at the PTY's full geometry (cols and rows) so TUI cursor-position
  * sequences land on the right line — see `fitPreview` for why. The card clips
- * the overflow and `applyContentAnchor` toggles the `.xterm` element between
- * bottom-anchored (alt-screen TUIs: most recent rows visible) and top-anchored
- * (short normal-buffer content that would otherwise be clipped off the top).
- * Empty snapshots show a DOM overlay placeholder instead of grid text, so the
- * placeholder can never be clipped by the oversized grid.
+ * the overflow and `applyContentAnchor` positions the `.xterm` element:
+ * bottom-anchored for alt-screen TUIs (most recent rows visible), and anchored
+ * to the content's tail for normal-buffer sessions (whose content may end
+ * anywhere in the grid). Empty snapshots show a DOM overlay placeholder
+ * instead of grid text, so the placeholder can never be clipped by the
+ * oversized grid.
  *
  * Refresh strategy: bootstrap once from the session-scoped preview source,
  * then append coalesced deltas. The mini only resets when the source emits
@@ -188,7 +189,7 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
     let term: Terminal | null = null;
     let container: HTMLDivElement | null = null;
     // The rendered `.xterm` element, cached once the terminal is open. Its
-    // top/bottom CSS anchor is toggled by applyContentAnchor.
+    // vertical position is set by applyContentAnchor.
     let xtermEl: HTMLElement | null = null;
     // A DOM overlay (NOT terminal cells) for the empty-state placeholder. It
     // sits in the visible card region OUTSIDE the bottom-pinned xterm, so it is
@@ -315,15 +316,15 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
     }
 
     /**
-     * Choose top- vs bottom-anchoring for the rendered (oversized) grid so the
-     * relevant rows stay in the card's clipped viewport.
+     * Position the rendered (oversized) grid so the relevant rows stay in the
+     * card's clipped viewport.
      *
-     * - Alt buffer (Claude/Codex TUIs paint the full grid): pin to the bottom,
-     *   so the most recent rows are visible and the intentionally-blank top
-     *   padding is what gets clipped.
-     * - Normal buffer (plain shell / pre-launch / a few lines): content lands at
-     *   the TOP. If it fits the visible window, anchor top so those rows aren't
-     *   clipped off; otherwise fall back to the bottom pin.
+     * - Alt buffer (TUIs that paint the full grid): pin to the bottom, so the
+     *   most recent rows are visible and the intentionally-blank top padding is
+     *   what gets clipped.
+     * - Normal buffer: shift the element so the visible band ENDS at the last
+     *   content row — see the inline comment for why a binary top/bottom
+     *   anchor is not enough.
      */
     function applyContentAnchor() {
       if (disposed || !term || !xtermEl) return;
@@ -348,18 +349,28 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
         }
       }
 
-      const fontSize = (term.options.fontSize as number | undefined) ?? MIN_FONT_SIZE;
-      const visibleRows = Math.max(1, Math.floor(el.clientHeight / (fontSize * CELL_HEIGHT_RATIO)));
-
-      if (lastContentRow + 1 <= visibleRows) {
-        // Content fits the visible window — anchor to the top so the few rows
-        // sit at the visible top-left and aren't clipped off the top.
-        xtermEl.style.bottom = "";
-        xtermEl.style.top = "0";
-      } else {
-        xtermEl.style.top = "";
-        xtermEl.style.bottom = "0";
-      }
+      // Anchor the visible band to the CONTENT'S TAIL, not the grid's edges.
+      // A binary top/bottom toggle has a blind spot: content ending mid-grid
+      // (e.g. resume output on rows 0..28 of a 71-row PTY) is outside BOTH the
+      // top band and the bottom band, rendering the card blank. Shift the
+      // element up just enough that the last content row is the band's last
+      // row; this degrades to top-anchor when content fits and to the old
+      // bottom-anchor when content reaches the viewport's end.
+      const core = (term as any)?._core;
+      const cellH: number =
+        core?._renderService?.dimensions?.css?.cell?.height ||
+        ((term.options.fontSize as number | undefined) ?? MIN_FONT_SIZE) * CELL_HEIGHT_RATIO;
+      const visibleRows = Math.max(1, Math.floor(el.clientHeight / cellH));
+      // Map the buffer row to a viewport row (xterm keeps the viewport
+      // scrolled to the bottom: rows baseY .. baseY + term.rows).
+      const baseY = buffer?.baseY ?? 0;
+      const contentViewportRow = Math.max(0, lastContentRow - baseY);
+      const offsetRows = Math.min(
+        Math.max(0, contentViewportRow + 1 - visibleRows),
+        Math.max(0, term.rows - visibleRows),
+      );
+      xtermEl.style.bottom = "";
+      xtermEl.style.top = `${-(offsetRows * cellH)}px`;
     }
 
     // ── Initialize terminal ──
@@ -547,7 +558,9 @@ export const MiniTerminal = memo(function MiniTerminal({ sessionId }: MiniTermin
         // claiming a subscription so a later resize re-enters cleanly and we
         // never leak a claimed-but-inert subscription.
         initTerminal();
-        if (!term) return;
+        if (!term) {
+          return;
+        }
 
         let subscription: Awaited<ReturnType<typeof subscribeToPreviewSource>>;
         try {

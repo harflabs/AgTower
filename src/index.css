@@ -1497,10 +1497,11 @@ html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrol
   -webkit-user-select: none !important;
 }
 /* The .xterm element is positioned absolute by JS — anchored bottom for
- * alt-screen TUIs (most recent rows visible) or top for short normal-buffer
- * content (see applyContentAnchor in mini-terminal.tsx) — when the PTY grid is
- * taller than the card. Don't constrain height — let xterm size to its natural
- * canvas height; the card's overflow:hidden clips the off-anchor overflow. */
+ * alt-screen TUIs (most recent rows visible) or to the content's tail for
+ * normal-buffer sessions (see applyContentAnchor in mini-terminal.tsx) — when
+ * the PTY grid is taller than the card. Don't constrain height — let xterm
+ * size to its natural canvas height; the card's overflow:hidden clips the
+ * off-band overflow. */
 .mini-terminal .xterm {
   padding: 0;
   background: transparent !important;

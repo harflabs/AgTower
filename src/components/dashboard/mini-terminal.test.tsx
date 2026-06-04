@@ -49,8 +49,11 @@ class MockTerminal {
     MockTerminal.instances.push(this);
   }
 
+  // How many leading buffer rows report text — drives applyContentAnchor's
+  // content-tail scan. 0 = empty grid (the placeholder path).
+  contentRows = 0;
+
   // Minimal xterm `buffer.active` shape so applyContentAnchor can scan rows.
-  // Empty grid (all blank lines) — the empty-state / placeholder path.
   get buffer() {
     return {
       active: {
@@ -58,7 +61,9 @@ class MockTerminal {
         baseY: 0,
         cursorY: 0,
         length: this.rows,
-        getLine: () => ({ translateToString: () => "" }),
+        getLine: (i: number) => ({
+          translateToString: () => (i < this.contentRows ? "content" : ""),
+        }),
       },
     };
   }
@@ -347,6 +352,61 @@ describe("MiniTerminal", () => {
     // Overlay is either never created or hidden; the grid holds the real data.
     expect(overlay?.style.display ?? "none").toBe("none");
     expect(terminal.written).toBe("hello");
+
+    await act(async () => {
+      view.root.unmount();
+    });
+  });
+
+  it("anchors the visible band to the content's tail for mid-grid content", async () => {
+    // The blind spot this guards: a 71-row grid whose content ends at row 28.
+    // A binary top/bottom anchor hides it under BOTH choices (top band shows
+    // rows 0..19, bottom band rows 51..70) and the card renders blank even
+    // though a non-empty snapshot was applied. The element must instead shift
+    // up just enough that the last content row is the band's last row.
+    nextSnapshot = snapshot("resume output", 1, 80, 71);
+    const view = await renderMini();
+    await makeVisible();
+    const terminal = MockTerminal.instances[0]!;
+
+    // Content occupies rows 0..28 of the 71-row grid.
+    terminal.contentRows = 29;
+    await act(async () => {
+      for (const observer of MockResizeObserver.instances) {
+        observer.callback([{ contentRect: { width: 320, height: 160 } }]);
+      }
+      await waitForFrame();
+      await flushAsync();
+    });
+
+    // fitPreview(320, 80, 71) clamps to the 8px floor; the mock has no real
+    // render dims, so cellH falls back to fontSize * CELL_HEIGHT_RATIO = 8.
+    // visibleRows = floor(160 / 8) = 20; offset = (28 + 1) - 20 = 9 rows.
+    expect(terminal.element.style.top).toBe("-72px");
+    expect(terminal.element.style.bottom).toBe("");
+
+    // Short content still top-anchors (offset clamps to 0).
+    terminal.contentRows = 5;
+    await act(async () => {
+      for (const observer of MockResizeObserver.instances) {
+        observer.callback([{ contentRect: { width: 320, height: 160 } }]);
+      }
+      await waitForFrame();
+      await flushAsync();
+    });
+    expect(terminal.element.style.top).toBe("0px");
+
+    // Content reaching the grid's end behaves like the old bottom anchor:
+    // offset clamps to term.rows - visibleRows = 51 rows.
+    terminal.contentRows = 71;
+    await act(async () => {
+      for (const observer of MockResizeObserver.instances) {
+        observer.callback([{ contentRect: { width: 320, height: 160 } }]);
+      }
+      await waitForFrame();
+      await flushAsync();
+    });
+    expect(terminal.element.style.top).toBe("-408px");
 
     await act(async () => {
       view.root.unmount();
