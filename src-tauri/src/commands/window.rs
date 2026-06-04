@@ -614,7 +614,12 @@ pub(crate) fn setup_native_menu(app: &tauri::App) -> tauri::Result<()> {
         Some(
             AboutMetadataBuilder::new()
                 .name(Some("AgTower"))
-                .version(Some(env!("CARGO_PKG_VERSION")))
+                // The runtime package info carries tauri.conf.json's version —
+                // the field the release workflow injects the tag version into.
+                // env!("CARGO_PKG_VERSION") would read Cargo.toml instead,
+                // which keeps the repo's 1.0.0 placeholder and made every
+                // release's About box claim 1.0.0.
+                .version(Some(app.package_info().version.to_string()))
                 .website(Some("https://github.com/harflabs/AgTower"))
                 .website_label(Some("GitHub"))
                 .copyright(Some("Copyright © Harf Labs"))
