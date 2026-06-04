@@ -14,7 +14,12 @@ interface MockRenderService {
   refreshRows: ReturnType<typeof vi.fn>;
 }
 
-function createMockTerminal({ rows = 24, synchronizedOutput = false, visible = true } = {}) {
+function createMockTerminal({
+  rows = 24,
+  synchronizedOutput = false,
+  visible = true,
+  hasRenderer = true,
+} = {}) {
   const element = document.createElement("div");
   document.body.appendChild(element);
   Object.defineProperty(element, "getBoundingClientRect", {
@@ -37,10 +42,11 @@ function createMockTerminal({ rows = 24, synchronizedOutput = false, visible = t
     _isNextRenderRedrawOnly: false,
     _needsFullRefresh: true,
     _pausedResizeTask: { flush: vi.fn() },
-    _renderer: { value: { renderRows: vi.fn() } },
+    _renderer: hasRenderer ? { value: { renderRows: vi.fn() } } : { value: undefined },
     _renderRows: vi.fn(),
     refreshRows: vi.fn(),
   };
+  const coreService = { decPrivateModes: { synchronizedOutput } };
   const refresh = vi.fn();
   const terminal = {
     element,
@@ -51,10 +57,11 @@ function createMockTerminal({ rows = 24, synchronizedOutput = false, visible = t
     rows,
     _core: {
       _renderService: renderService,
+      coreService,
     },
   } as unknown as Terminal;
 
-  return { refresh, renderService, terminal };
+  return { coreService, refresh, renderService, terminal };
 }
 
 describe("xterm render integrity", () => {
@@ -80,7 +87,13 @@ describe("xterm render integrity", () => {
     expect(refresh).not.toHaveBeenCalled();
   });
 
-  it("preserves xterm synchronized-output buffering", () => {
+  it("paints the current grid directly even under synchronized output", () => {
+    // A stranded `?2026h` (frame opened, `?2026l` not yet delivered) leaves
+    // RenderService buffering. The old integrity path called refreshRows, which
+    // only buffers and never paints — so a visible mini could sit permanently
+    // blank if the stream went quiet before the close arrived. The integrity
+    // pass only runs after our own visible signals, so it must put the current
+    // grid on screen; the next real frame repaints it correctly.
     const { refresh, renderService, terminal } = createMockTerminal({
       synchronizedOutput: true,
     });
@@ -92,10 +105,27 @@ describe("xterm render integrity", () => {
     expect(renderService._pausedResizeTask.flush).toHaveBeenCalledTimes(1);
     expect(renderService._isPaused).toBe(false);
     expect(renderService._needsFullRefresh).toBe(false);
-    expect(renderService.refreshRows).toHaveBeenCalledWith(0, 23, true);
-    expect(renderService._renderer?.value?.renderRows).not.toHaveBeenCalled();
+    expect(renderService._renderer?.value?.renderRows).toHaveBeenCalledWith(0, 23);
+    expect(renderService.refreshRows).not.toHaveBeenCalled();
     expect(renderService._renderRows).not.toHaveBeenCalled();
     expect(refresh).not.toHaveBeenCalled();
+  });
+
+  it("clears a stranded synchronized-output mode on the fallback render path", () => {
+    // When the private renderer handle is unavailable we fall back to
+    // _renderRows / refreshRows, both of which buffer under synchronized
+    // output. Clear the stranded mode first so the fallback actually paints;
+    // the next live delta's own `?2026h` re-enters sync cleanly.
+    const { coreService, renderService, terminal } = createMockTerminal({
+      synchronizedOutput: true,
+      hasRenderer: false,
+    });
+
+    forceTerminalRender(terminal);
+
+    expect(coreService.decPrivateModes.synchronizedOutput).toBe(false);
+    expect(renderService._renderRows).toHaveBeenCalledWith(0, 23);
+    expect(renderService._isNextRenderRedrawOnly).toBe(true);
   });
 
   it("does not unpause or render terminals that are still hidden", () => {

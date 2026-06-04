@@ -13,12 +13,13 @@
   "bugs": {
     "url": "https://github.com/harflabs/AgTower/issues"
   },
-  "packageManager": "pnpm@11.0.8",
+  "packageManager": "pnpm@11.5.1",
   "type": "module",
   "scripts": {
     "check": "pnpm lint && pnpm lint:dead && pnpm test && pnpm build && pnpm check:rust",
     "check:rust": "cargo fmt --manifest-path src-tauri/Cargo.toml --check && cargo clippy --manifest-path src-tauri/Cargo.toml --all-targets --all-features -- -D warnings && cargo test --manifest-path src-tauri/Cargo.toml",
     "dev": "vite",
+    "tauri:dev": "tauri dev --config src-tauri/tauri.dev.conf.json",
     "build": "tsc && tsc -p tsconfig.node.json && vite build",
     "build:mac": "APPLE_SIGNING_IDENTITY=\"${APPLE_SIGNING_IDENTITY:--}\" tauri build --bundles app --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}'",
     "build:dmg": "APPLE_SIGNING_IDENTITY=\"${APPLE_SIGNING_IDENTITY:--}\" tauri build --bundles app,dmg --config '{\"bundle\":{\"createUpdaterArtifacts\":false}}' && node scripts/rename-dmg.mjs",

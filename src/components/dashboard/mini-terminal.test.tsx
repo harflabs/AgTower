@@ -32,21 +32,44 @@ class MockTerminal {
 
   cols: number;
   rows: number;
-  buffer = "";
+  // Accumulated text written into the terminal (assertion target).
+  written = "";
   options: Record<string, unknown>;
+  // Which screen buffer is active — applyContentAnchor branches on this.
+  bufferType: "normal" | "alternate" = "normal";
+  // The rendered .xterm element the component caches and anchors.
+  element: HTMLElement;
 
   constructor(options: { cols?: number; rows?: number } = {}) {
     this.cols = options.cols ?? 80;
     this.rows = options.rows ?? 24;
     this.options = { ...options };
+    this.element = document.createElement("div");
+    this.element.className = "xterm";
     MockTerminal.instances.push(this);
   }
 
+  // Minimal xterm `buffer.active` shape so applyContentAnchor can scan rows.
+  // Empty grid (all blank lines) — the empty-state / placeholder path.
+  get buffer() {
+    return {
+      active: {
+        type: this.bufferType,
+        baseY: 0,
+        cursorY: 0,
+        length: this.rows,
+        getLine: () => ({ translateToString: () => "" }),
+      },
+    };
+  }
+
   dispose = vi.fn();
-  open = vi.fn();
+  open = vi.fn((container: HTMLElement) => {
+    container.appendChild(this.element);
+  });
   refresh = vi.fn();
   reset = vi.fn(() => {
-    this.buffer = "";
+    this.written = "";
   });
   resize = vi.fn((cols: number, rows: number) => {
     this.cols = cols;
@@ -54,7 +77,7 @@ class MockTerminal {
   });
   write = vi.fn((data: string | Uint8Array, callback?: () => void) => {
     const text = typeof data === "string" ? data : new TextDecoder().decode(data);
-    this.buffer += text;
+    this.written += text;
     callback?.();
   });
 }
@@ -122,9 +145,31 @@ function snapshot(text: string, revision: number, cols = 80, rows = 24): Preview
   };
 }
 
+function emptySnapshot(
+  processState: "running" | "terminated",
+  revision: number,
+): PreviewSourceSnapshot {
+  return {
+    data: new Uint8Array(0),
+    cols: 80,
+    rows: 24,
+    revision,
+    processState,
+    attachmentState: "detached",
+  };
+}
+
 async function flushAsync(): Promise<void> {
   await Promise.resolve();
   await Promise.resolve();
+}
+
+// Resolve after the next animation frame so a ResizeObserver-scheduled
+// requestAnimationFrame callback has a chance to run (real timers).
+function waitForFrame(): Promise<void> {
+  return new Promise((resolve) => {
+    requestAnimationFrame(() => resolve());
+  });
 }
 
 async function renderMini() {
@@ -191,7 +236,7 @@ describe("MiniTerminal", () => {
     expect(subscribeMock).toHaveBeenCalledTimes(1);
     expect(MockTerminal.instances).toHaveLength(1);
     expect(MockTerminal.instances[0]?.reset).toHaveBeenCalledTimes(1);
-    expect(MockTerminal.instances[0]?.buffer).toBe("boot");
+    expect(MockTerminal.instances[0]?.written).toBe("boot");
 
     await act(async () => {
       view.root.unmount();
@@ -212,7 +257,7 @@ describe("MiniTerminal", () => {
     });
 
     expect(terminal.reset).toHaveBeenCalledTimes(1);
-    expect(terminal.buffer).toBe("boot++");
+    expect(terminal.written).toBe("boot++");
 
     await act(async () => {
       view.root.unmount();
@@ -230,7 +275,7 @@ describe("MiniTerminal", () => {
     });
 
     expect(terminal.reset).toHaveBeenCalledTimes(2);
-    expect(terminal.buffer).toBe("resynced");
+    expect(terminal.written).toBe("resynced");
 
     await act(async () => {
       view.root.unmount();
@@ -256,6 +301,111 @@ describe("MiniTerminal", () => {
 
     await act(async () => {
       view.root.unmount();
+    });
+  });
+
+  it("shows the DOM overlay placeholder for an empty snapshot instead of writing the grid", async () => {
+    nextSnapshot = emptySnapshot("running", 1);
+    const view = await renderMini();
+    await makeVisible();
+    const terminal = MockTerminal.instances[0]!;
+
+    const overlay = view.mini.querySelector("[data-mini-overlay]") as HTMLElement | null;
+    expect(overlay).not.toBeNull();
+    expect(overlay?.style.display).not.toBe("none");
+    expect(overlay?.textContent).toContain("Waiting for output");
+    // The placeholder is NOT written into the terminal grid.
+    expect(terminal.written).toBe("");
+    expect(terminal.write).not.toHaveBeenCalled();
+
+    await act(async () => {
+      view.root.unmount();
+    });
+  });
+
+  it("shows the external-CLI placeholder for a terminated empty snapshot", async () => {
+    nextSnapshot = emptySnapshot("terminated", 1);
+    const view = await renderMini();
+    await makeVisible();
+
+    const overlay = view.mini.querySelector("[data-mini-overlay]") as HTMLElement | null;
+    expect(overlay?.style.display).not.toBe("none");
+    expect(overlay?.textContent).toContain("External CLI session");
+
+    await act(async () => {
+      view.root.unmount();
+    });
+  });
+
+  it("hides the overlay and writes the grid for a non-empty snapshot", async () => {
+    nextSnapshot = snapshot("hello", 1);
+    const view = await renderMini();
+    await makeVisible();
+    const terminal = MockTerminal.instances[0]!;
+
+    const overlay = view.mini.querySelector("[data-mini-overlay]") as HTMLElement | null;
+    // Overlay is either never created or hidden; the grid holds the real data.
+    expect(overlay?.style.display ?? "none").toBe("none");
+    expect(terminal.written).toBe("hello");
+
+    await act(async () => {
+      view.root.unmount();
+    });
+  });
+
+  it("subscribes after a deferred sub-10px card grows, never dead-ending blank", async () => {
+    // Prod sequence that previously dead-ended: the IntersectionObserver fires
+    // visible while the card is still 0x0, so initTerminal bails and the term is
+    // null. The old subscribeVisible bailed on `!term`, and the fallback only
+    // re-inited (never subscribed) — leaving a term with no subscription, blank
+    // forever. The consolidated path must subscribe once the card grows.
+    nextSnapshot = snapshot("late", 1);
+    const { MiniTerminal } = await import("@/components/dashboard/mini-terminal");
+    const host = document.createElement("div");
+    document.body.appendChild(host);
+    const root = createRoot(host);
+
+    await act(async () => {
+      root.render(<MiniTerminal sessionId="session-1" />);
+    });
+
+    const mini = host.querySelector(".mini-terminal") as HTMLDivElement;
+    // Card starts at 0x0 — too small for initTerminal.
+    Object.defineProperty(mini, "clientWidth", { configurable: true, value: 0 });
+    Object.defineProperty(mini, "clientHeight", { configurable: true, value: 0 });
+
+    // Become visible while sub-10px: must NOT leak a subscription or render.
+    await act(async () => {
+      for (const observer of MockIntersectionObserver.instances) {
+        observer.callback([{ isIntersecting: true, intersectionRatio: 1 }]);
+      }
+      await flushAsync();
+    });
+    expect(MockTerminal.instances).toHaveLength(0);
+    expect(unsubscribeSpy).not.toHaveBeenCalled();
+
+    // Card grows; the ResizeObserver RAF re-enters the consolidated path. The
+    // RO callback schedules a requestAnimationFrame, so wait for it to fire.
+    Object.defineProperty(mini, "clientWidth", { configurable: true, value: 320 });
+    Object.defineProperty(mini, "clientHeight", { configurable: true, value: 160 });
+    await act(async () => {
+      for (const observer of MockResizeObserver.instances) {
+        observer.callback([{ contentRect: { width: 320, height: 160 } }]);
+      }
+      await waitForFrame();
+      await flushAsync();
+      await flushAsync();
+    });
+
+    // Exactly one terminal now exists, the subscription was established, and the
+    // snapshot was applied (real data written) — never the permanent-blank
+    // dead-end (term exists, buffer empty, overlay hidden).
+    expect(MockTerminal.instances).toHaveLength(1);
+    expect(subscribeMock).toHaveBeenCalled();
+    expect(MockTerminal.instances[0]?.written).toBe("late");
+
+    await act(async () => {
+      root.unmount();
     });
   });
 });

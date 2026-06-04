@@ -4,6 +4,8 @@ import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 const tauriListeners = new Map<string, Set<(event: { payload: unknown }) => void>>();
 const invokeMock = vi.fn<(command: string, args?: unknown) => Promise<unknown>>();
+// Failure injection for the SerializeAddon mock (set by individual tests).
+const serializeMockState = { failNext: false };
 
 class MockTerminal {
   static instances: MockTerminal[] = [];
@@ -12,6 +14,7 @@ class MockTerminal {
   cols: number;
   rows: number;
   options: Record<string, unknown>;
+  disposed = false;
 
   constructor(options: { cols?: number; rows?: number } = {}) {
     this.cols = options.cols ?? 80;
@@ -20,7 +23,9 @@ class MockTerminal {
     MockTerminal.instances.push(this);
   }
 
-  dispose = vi.fn();
+  dispose = vi.fn(() => {
+    this.disposed = true;
+  });
 
   loadAddon = vi.fn((addon: { activate?: (terminal: MockTerminal) => void }) => {
     addon.activate?.(this);
@@ -87,6 +92,15 @@ vi.mock("@xterm/addon-serialize", () => ({
       this.target = terminal;
     }
     serialize() {
+      if (serializeMockState.failNext) {
+        serializeMockState.failNext = false;
+        throw new Error("injected serialize failure");
+      }
+      // Mirror real xterm: serializing a disposed terminal reads disposed core
+      // internals and throws.
+      if (this.target?.disposed) {
+        throw new Error("serialize on disposed terminal");
+      }
       return this.target?.buffer ?? "";
     }
     dispose() {}
@@ -156,7 +170,10 @@ describe("terminal preview sources", () => {
     vi.useFakeTimers();
     tauriListeners.clear();
     invokeMock.mockReset();
+    sessionStoreMock.getState.mockReset();
+    sessionStoreMock.getState.mockReturnValue({ sessions: {} } as never);
     MockTerminal.instances = [];
+    serializeMockState.failNext = false;
   });
 
   afterEach(async () => {
@@ -398,6 +415,65 @@ describe("terminal preview sources", () => {
     second.unsubscribe();
   });
 
+  it("resyncs instead of front-slicing when the accumulated snapshot would overflow", async () => {
+    // The accumulated snapshot is a SerializeAddon stream + raw-delta tail. It
+    // must never be front-sliced (that would evict the serialized preamble or
+    // cut mid-escape, leaving a late subscriber with a garbled snapshot). When
+    // appending a delta would cross PREVIEW_SNAPSHOT_MAX_BYTES we instead leave
+    // the snapshot intact and resync — which re-serializes the headless grid
+    // (the mock returns the terminal's buffer) into a fresh, identifiable stream.
+    const PREVIEW_SNAPSHOT_MAX_BYTES = 2 * 1024 * 1024;
+    // A bootstrap snapshot just under the cap, beginning with a recognizable
+    // preamble marker so we can prove the served snapshot is never a byte-tail.
+    const bigSnapshot = `PREAMBLE${"x".repeat(PREVIEW_SNAPSHOT_MAX_BYTES - 10)}`;
+    invokeMock.mockResolvedValue({
+      processState: "running",
+      attachmentState: "detached",
+      cols: 80,
+      rows: 24,
+      snapshot: encode(bigSnapshot),
+      outputOffset: bigSnapshot.length,
+    });
+    const resets: string[] = [];
+
+    const mod = await import("@/lib/terminal-pool");
+    const subscription = await mod.subscribeToPreviewSource("session-overflow", {
+      onReset: (snapshot) => {
+        resets.push(decodeSnapshot(snapshot.data).slice(0, 8));
+      },
+    });
+
+    // The first snapshot is the serialized headless grid (the mock returns the
+    // headless terminal's buffer, which is the bootstrap snapshot written into
+    // it), and it still begins with PREAMBLE.
+    expect(decodeSnapshot(subscription.snapshot.data).startsWith("PREAMBLE")).toBe(true);
+
+    // Emit a delta that pushes the accumulated snapshot past the cap. The flush
+    // applies it to the headless terminal and calls emitPreviewDelta, which sees
+    // the overflow and schedules a notify=true resync rather than front-slicing.
+    emitTauriEvent("pty-output-broadcast:session-overflow", {
+      data: encode("D".repeat(100)),
+      endOffset: bigSnapshot.length + 100,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    await vi.runAllTimersAsync();
+    await flushAsync();
+
+    // The overflow triggered a resync that fired onReset with a freshly
+    // serialized stream — still beginning with the PREAMBLE marker, proving it
+    // is self-contained and not a front-sliced byte-tail.
+    expect(resets.length).toBeGreaterThan(0);
+    expect(resets.every((prefix) => prefix === "PREAMBLE")).toBe(true);
+
+    // A late subscriber is served a snapshot that still begins with PREAMBLE
+    // (never a tail slice that lost the preamble).
+    const second = await mod.subscribeToPreviewSource("session-overflow", {});
+    expect(decodeSnapshot(second.snapshot.data).startsWith("PREAMBLE")).toBe(true);
+
+    subscription.unsubscribe();
+    second.unsubscribe();
+  });
+
   it("does not mutate a pooled terminal after it leaves the parked pool", async () => {
     const bootstrapResolvers: Array<(value: unknown) => void> = [];
     invokeMock.mockImplementation(
@@ -452,6 +528,43 @@ describe("terminal preview sources", () => {
     expect(decodeSnapshot(subscription.snapshot.data)).toBe("live");
 
     subscription.unsubscribe();
+  });
+
+  it("derives a running placeholder state from the store when the bootstrap is null", async () => {
+    // get_preview_bootstrap returns null when a session has no PtyHandle yet
+    // (lazy PTY not yet opened, or killed-and-not-recreated by a restart). With
+    // no bootstrap, no hint, and no pooled entry, the process state must come
+    // from the session store — defaulting to 'terminated' would mislabel a live
+    // session as an external CLI session in the preview.
+    invokeMock.mockResolvedValue(null);
+    sessionStoreMock.getState.mockReturnValue({
+      sessions: { "session-live": { status: "running" } },
+    } as never);
+
+    const mod = await import("@/lib/terminal-pool");
+    const subscription = await mod.subscribeToPreviewSource("session-live", {});
+
+    expect(subscription.snapshot.processState).toBe("running");
+
+    subscription.unsubscribe();
+  });
+
+  it("derives a terminated placeholder state from the store for a closed/absent session", async () => {
+    invokeMock.mockResolvedValue(null);
+    sessionStoreMock.getState.mockReturnValue({
+      sessions: { "session-done": { status: "closed" } },
+    } as never);
+
+    const mod = await import("@/lib/terminal-pool");
+    const closed = await mod.subscribeToPreviewSource("session-done", {});
+    expect(closed.snapshot.processState).toBe("terminated");
+    closed.unsubscribe();
+
+    // A session entirely absent from the store is also terminated.
+    sessionStoreMock.getState.mockReturnValue({ sessions: {} } as never);
+    const absent = await mod.subscribeToPreviewSource("session-missing", {});
+    expect(absent.snapshot.processState).toBe("terminated");
+    absent.unsubscribe();
   });
 
   it("applyTerminalFontSize is a no-op (returns null) when no pool entry exists", async () => {
@@ -542,5 +655,104 @@ describe("terminal preview sources", () => {
     });
     await vi.runAllTimersAsync();
     expect(deltas).toEqual([]);
+  });
+
+  it("bails out of a headless rebuild when the last subscriber unsubscribes mid-write", async () => {
+    // buildHeadlessSnapshot suspends on the snapshot write after the headless
+    // terminal exists. If the last subscriber unsubscribes in that window,
+    // destroyPreviewSource disposes the terminal; the resumed rebuild must NOT
+    // serialize the disposed instance (which throws and rejects the resync
+    // promise as an unhandled rejection — failing this test on regression).
+    invokeMock.mockResolvedValue({
+      processState: "running",
+      attachmentState: "detached",
+      cols: 80,
+      rows: 24,
+      snapshot: encode("seed"),
+      outputOffset: 4,
+    });
+
+    const mod = await import("@/lib/terminal-pool");
+    const subscription = await mod.subscribeToPreviewSource("session-race", {});
+    const headless = MockTerminal.instances[0]!;
+
+    // Defer the next write completion so the rebuild stays suspended mid-write.
+    const deferredCallbacks: Array<() => void> = [];
+    headless.write = vi.fn((data: string | Uint8Array, callback?: () => void) => {
+      const text = typeof data === "string" ? data : new TextDecoder().decode(data);
+      headless.buffer += text;
+      if (callback) deferredCallbacks.push(callback);
+    });
+
+    // A changed-dims state broadcast triggers the rebuild.
+    emitTauriEvent("pty-state-broadcast:session-race", {
+      processState: "running",
+      attachmentState: "detached",
+      cols: 100,
+      rows: 30,
+    });
+    await vi.waitFor(() => {
+      expect(deferredCallbacks).toHaveLength(1);
+    });
+
+    // Last subscriber leaves mid-write: source destroyed, terminal disposed.
+    subscription.unsubscribe();
+    expect(headless.dispose).toHaveBeenCalled();
+    expect(headless.disposed).toBe(true);
+
+    // The deferred write completes AFTER disposal — the rebuild must bail.
+    deferredCallbacks[0]!();
+    await flushAsync();
+    await vi.runAllTimersAsync();
+  });
+
+  it("removes the listener when the initial snapshot fails, so a retry cannot double-subscribe", async () => {
+    // subscribeToPreviewSource registers the listener BEFORE awaiting the
+    // first snapshot. If that snapshot throws, the listener must be removed
+    // again — otherwise it leaks with no unsubscribe handle and double-delivers
+    // every delta once the caller retries with a fresh listener object.
+    invokeMock.mockResolvedValue({
+      processState: "running",
+      attachmentState: "detached",
+      cols: 80,
+      rows: 24,
+      snapshot: encode("seed"),
+      outputOffset: 4,
+    });
+    serializeMockState.failNext = true;
+    const deltas: string[] = [];
+    const failedListener = {
+      onDelta: (event: { data: Uint8Array }) => {
+        deltas.push(`leaked:${new TextDecoder().decode(event.data)}`);
+      },
+    };
+    const retryListener = {
+      onDelta: (event: { data: Uint8Array }) => {
+        deltas.push(`retry:${new TextDecoder().decode(event.data)}`);
+      },
+    };
+
+    const mod = await import("@/lib/terminal-pool");
+    await expect(mod.subscribeToPreviewSource("session-fail", failedListener)).rejects.toThrow(
+      "injected serialize failure",
+    );
+    await flushAsync();
+
+    // The failed subscribe left nothing behind: the source was destroyed and
+    // its broadcast listeners removed.
+    expect(tauriListeners.get("pty-output-broadcast:session-fail")).toBeUndefined();
+    expect(tauriListeners.get("pty-state-broadcast:session-fail")).toBeUndefined();
+
+    // A retry succeeds, and the failed attempt's listener is gone: the delta
+    // is delivered exactly once, to the retry listener only.
+    const retry = await mod.subscribeToPreviewSource("session-fail", retryListener);
+    emitTauriEvent("pty-output-broadcast:session-fail", {
+      data: encode("D"),
+      endOffset: 5,
+    });
+    await vi.advanceTimersByTimeAsync(100);
+    expect(deltas).toEqual(["retry:D"]);
+
+    retry.unsubscribe();
   });
 });

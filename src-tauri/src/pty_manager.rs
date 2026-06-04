@@ -4,7 +4,7 @@ use portable_pty::{native_pty_system, CommandBuilder, MasterPty, PtySize};
 use serde::{Deserialize, Serialize};
 use std::collections::HashMap;
 use std::io::{Read, Write};
-use std::sync::atomic::{AtomicBool, AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, OnceLock};
 use tauri::ipc::Channel;
 use tauri::{AppHandle, Emitter, Manager};
@@ -37,8 +37,25 @@ const RING_BUFFER_CAPACITY: usize = 2 * 1024 * 1024;
 // ---------------------------------------------------------------------------
 const TMUX_SOCKET_NAME: &str = "agtower";
 
+/// The tmux session name prefix used by the production build. tmux sessions are
+/// named `agtower-<session-id>`. This is the historical prefix and MUST stay
+/// stable so an upgraded production install still recognises (and reaps) its
+/// own pre-existing sessions.
+const PROD_TMUX_PREFIX: &str = "agtower-";
+
+/// The tmux session name prefix used by a side-by-side `pnpm tauri:dev`
+/// instance. Derived from the `.dev` suffix on its bundle identifier so a dev
+/// build's sessions are named `agtower-dev-<session-id>` and live in a
+/// namespace production's reaper deliberately skips (see
+/// `tmux_session_belongs_to_prefix`).
+const DEV_TMUX_PREFIX: &str = "agtower-dev-";
+
 static TMUX_CONFIG_PATH: OnceLock<String> = OnceLock::new();
 static BUNDLED_BIN_DIR: OnceLock<String> = OnceLock::new();
+/// tmux session name prefix for THIS instance, derived once at startup from the
+/// app's bundle identifier. Production uses `agtower-`; a `.dev` identifier uses
+/// `agtower-dev-`. Cached so `create_session` and the orphan reaper agree.
+static TMUX_SESSION_PREFIX: OnceLock<String> = OnceLock::new();
 
 /// Resolve the directory that ships AgTower's bundled helper CLIs (currently
 /// just `agtower-hook`). Same resolution strategy as `init_tmux_config`:
@@ -132,6 +149,66 @@ fn tmux_config_path() -> &'static str {
             eprintln!("[pty] tmux_config_path() called before init_tmux_config()");
             ""
         })
+}
+
+/// Derive this instance's tmux session-name prefix from its bundle identifier.
+///
+/// Production (`com.harflabs.agtower`) keeps the historical `agtower-` prefix
+/// so an upgraded install still owns its existing sessions. A dev overlay
+/// identifier ending in `.dev` (`com.harflabs.agtower.dev`) gets `agtower-dev-`
+/// so the two installs can run side-by-side without colliding on session names.
+///
+/// Pure and total: any identifier we don't recognise as the dev variant maps to
+/// the production prefix, which is the safe default (a misconfigured build never
+/// silently invents a third namespace).
+fn tmux_prefix_for_identifier(identifier: &str) -> &'static str {
+    if identifier.ends_with(".dev") {
+        DEV_TMUX_PREFIX
+    } else {
+        PROD_TMUX_PREFIX
+    }
+}
+
+/// Initialise the cached tmux session prefix from the app's bundle identifier.
+/// Called once from Tauri `setup()` before any tmux work. Idempotent via
+/// `OnceLock`.
+pub(crate) fn init_tmux_session_prefix(app: &AppHandle) {
+    TMUX_SESSION_PREFIX.get_or_init(|| {
+        let identifier = &app.config().identifier;
+        tmux_prefix_for_identifier(identifier).to_string()
+    });
+}
+
+/// Return THIS instance's tmux session prefix. Falls back to the production
+/// prefix if accessed before `init_tmux_session_prefix` ran — an ordering bug
+/// we shouldn't be able to introduce, but the production prefix is the safe
+/// default for both naming and reaping.
+fn tmux_session_prefix() -> &'static str {
+    TMUX_SESSION_PREFIX
+        .get()
+        .map(String::as_str)
+        .unwrap_or(PROD_TMUX_PREFIX)
+}
+
+/// Decide whether a tmux session named `name` belongs to the instance that owns
+/// `prefix`, for the purpose of orphan reaping.
+///
+/// The subtlety: the production prefix `agtower-` is a string-prefix of the dev
+/// prefix `agtower-dev-`, so a naive `name.starts_with(prefix)` would make the
+/// production reaper match — and KILL — a live dev instance's
+/// `agtower-dev-<id>` sessions. To stay safe across side-by-side installs, the
+/// production reaper claims a session only when it carries the production prefix
+/// AND does not carry the dev prefix. The dev reaper has no such ambiguity: its
+/// prefix is strictly more specific.
+fn tmux_session_belongs_to_prefix(name: &str, prefix: &str) -> bool {
+    if !name.starts_with(prefix) {
+        return false;
+    }
+    // Production must not reap the more-specific dev namespace.
+    if prefix == PROD_TMUX_PREFIX && name.starts_with(DEV_TMUX_PREFIX) {
+        return false;
+    }
+    true
 }
 
 #[derive(Debug, Clone, Deserialize)]
@@ -417,6 +494,13 @@ struct RingBuffer {
     buf: Vec<u8>,
     write_pos: usize,
     len: usize,
+    /// Monotonic count of all bytes ever pushed into the ring. Guarded by the
+    /// same mutex as the buffer so any holder of the ring lock observes a
+    /// consistent snapshot+offset pair: a preview bootstrap that serializes the
+    /// snapshot under the lock reads the exact offset for those bytes, never an
+    /// offset that lags behind the snapshot (which would let live deltas
+    /// re-apply bytes the snapshot already contains, doubling rows).
+    output_offset: u64,
     /// Tracks the TUI's one-time setup so previews can reconstruct it even
     /// after the original sequences scroll out of the ring.
     setup: TermSetup,
@@ -428,6 +512,7 @@ impl RingBuffer {
             buf: vec![0u8; capacity],
             write_pos: 0,
             len: 0,
+            output_offset: 0,
             setup: TermSetup::default(),
         }
     }
@@ -448,7 +533,10 @@ impl RingBuffer {
     }
 
     /// Append data to the ring buffer, overwriting oldest bytes when full.
-    fn push_slice(&mut self, data: &[u8]) {
+    /// Returns the new total output offset (monotonic count of all bytes ever
+    /// pushed). Callers broadcast this as the chunk's end offset so preview
+    /// consumers can reconcile it against the bootstrap snapshot's offset.
+    fn push_slice(&mut self, data: &[u8]) -> u64 {
         // Track setup sequences before they can be evicted from the ring.
         self.setup.observe(data);
         let cap = self.buf.len();
@@ -457,7 +545,8 @@ impl RingBuffer {
             self.buf.copy_from_slice(&data[start..]);
             self.write_pos = 0;
             self.len = cap;
-            return;
+            self.output_offset += data.len() as u64;
+            return self.output_offset;
         }
 
         let first_chunk = cap - self.write_pos;
@@ -472,6 +561,13 @@ impl RingBuffer {
 
         self.write_pos = (self.write_pos + data.len()) % cap;
         self.len = (self.len + data.len()).min(cap);
+        self.output_offset += data.len() as u64;
+        self.output_offset
+    }
+
+    /// Total count of all bytes ever pushed, guarded by the ring mutex.
+    fn output_offset(&self) -> u64 {
+        self.output_offset
     }
 
     /// Return all valid bytes in chronological order.
@@ -513,9 +609,6 @@ struct PtyHandle {
     /// Current PTY dimensions (cols, rows). Kept in sync with `pty_master.resize()`
     /// so snapshot consumers (mini-terminals) can size their previews to match.
     dimensions: Arc<Mutex<(u16, u16)>>,
-    /// Monotonic count of PTY output bytes emitted so far. Used by preview-only
-    /// consumers to reconcile bootstrap snapshots with live broadcasts.
-    output_offset: Arc<AtomicU64>,
     /// Name of the tmux session wrapping this PTY, when `launch_in_tmux` was
     /// true at creation time. Populated so `kill_session` and `cleanup_all`
     /// can explicitly `tmux kill-session` instead of leaking a detached
@@ -1092,7 +1185,9 @@ impl PtyManager {
     /// output to the provided channel.
     ///
     /// `launch_in_tmux`, when true, wraps the resolved provider command in
-    /// `tmux new-session -s agtower-<session-id> <shell-escaped command>`.
+    /// `tmux new-session -s <prefix><session-id> <shell-escaped command>`,
+    /// where `<prefix>` is this instance's tmux prefix (`agtower-` for the
+    /// production build, `agtower-dev-` for a side-by-side dev instance).
     /// The user is expected to have tmux installed themselves; we do not
     /// bundle it. This is the entry point for Claude Code's experimental
     /// agent-teams display mode — once inside tmux, Claude Code's native
@@ -1167,7 +1262,7 @@ impl PtyManager {
         // Tracks the tmux session we spawned (if any) so kill_session can
         // explicitly tear it down later. `None` for directly-launched sessions.
         let tmux_session_name: Option<String> = if launch_in_tmux {
-            Some(format!("agtower-{}", session_id))
+            Some(format!("{}{}", tmux_session_prefix(), session_id))
         } else {
             None
         };
@@ -1327,7 +1422,6 @@ impl PtyManager {
         let attachment_state = Arc::new(Mutex::new(PtyAttachmentState::Attached));
         let dispatch_lock = Arc::new(Mutex::new(()));
         let dimensions = Arc::new(Mutex::new((cols, rows)));
-        let output_offset = Arc::new(AtomicU64::new(0));
         let focus_reporting_enabled = Arc::new(AtomicBool::new(false));
         let active_owner = Arc::new(Mutex::new(Some(PtyOwnerLease {
             token: owner_token.to_string(),
@@ -1359,7 +1453,6 @@ impl PtyManager {
                     exit_info: Arc::clone(&exit_info),
                     flow_control: Arc::clone(&flow_control),
                     dimensions: Arc::clone(&dimensions),
-                    output_offset: Arc::clone(&output_offset),
                     tmux_session_name: tmux_session_name.clone(),
                     focus_reporting_enabled: Arc::clone(&focus_reporting_enabled),
                 },
@@ -1376,7 +1469,6 @@ impl PtyManager {
         let dimensions_for_panic = Arc::clone(&dimensions);
         let dispatch_lock_for_reader = Arc::clone(&dispatch_lock);
         let flow_control_for_reader = Arc::clone(&flow_control);
-        let output_offset_for_reader = Arc::clone(&output_offset);
         let focus_reporting_for_reader = Arc::clone(&focus_reporting_enabled);
 
         std::thread::spawn(move || {
@@ -1493,10 +1585,13 @@ impl PtyManager {
                             let end_offset;
                             {
                                 let _dispatch_guard = dispatch_lock_for_reader.lock();
-                                ring_buffer.lock().push_slice(data);
-                                end_offset = output_offset_for_reader
-                                    .fetch_add(data.len() as u64, Ordering::SeqCst)
-                                    + data.len() as u64;
+                                // Take the end offset from the ring under its own lock so
+                                // the broadcast offset is consistent with the bytes a
+                                // concurrent preview bootstrap can observe in the snapshot.
+                                // The ring's offset field is the single source of truth,
+                                // so a preview bootstrap that captures snapshot+offset
+                                // under the same lock can never see them disagree.
+                                end_offset = ring_buffer.lock().push_slice(data);
 
                                 // Send to the active channel (full terminal) immediately.
                                 // Delaying flush until a subsequent read can strand the tail
@@ -1866,7 +1961,11 @@ impl PtyManager {
             let mut bytes = rb.setup_preamble();
             bytes.extend_from_slice(&rb.snapshot());
             let snap = B64.encode(&bytes);
-            let offset = handle.output_offset.load(Ordering::SeqCst);
+            // Read the offset from the ring itself, under the same lock, so it
+            // exactly matches the bytes present in the snapshot. Reading the
+            // separate atomic here would risk capturing a snapshot that already
+            // includes a chunk whose offset the reader thread hasn't stored yet.
+            let offset = rb.output_offset();
             (snap, offset)
         };
         Some(PtyPreviewBootstrap {
@@ -1936,17 +2035,24 @@ fn kill_tmux_session(name: &str) {
         .output();
 }
 
-/// List orphaned `agtower-*` tmux sessions left over from a previous run
-/// and kill them. Runs once at app startup — any session matching our
-/// naming scheme at that point is by definition not ours (we haven't
-/// created any yet), so it's a crash leftover we should clean up.
+/// List orphaned tmux sessions left over from a previous run of THIS instance
+/// and kill them. Runs once at app startup — any session carrying our own
+/// prefix at that point is by definition not live (we haven't created any yet),
+/// so it's a crash leftover we should clean up.
 ///
-/// Scoped to our dedicated `-L agtower` socket, so we never touch sessions
-/// in the user's own tmux server. Safe no-op when tmux isn't installed or
-/// when no AgTower tmux server has ever run on this machine (the
-/// `list-sessions` call returns non-zero and we bail early).
+/// Reaping is scoped to this instance's prefix via
+/// `tmux_session_belongs_to_prefix`. The production and dev builds share the
+/// same `-L agtower` tmux socket, so the reaper sees BOTH namespaces' sessions
+/// — the prefix check is what keeps the production build from killing a live
+/// side-by-side dev instance's `agtower-dev-*` sessions (and vice versa).
+///
+/// Scoped to our dedicated `-L agtower` socket, so we never touch sessions in
+/// the user's own tmux server. Safe no-op when tmux isn't installed or when no
+/// AgTower tmux server has ever run on this machine (the `list-sessions` call
+/// returns non-zero and we bail early).
 pub(crate) fn cleanup_orphan_agtower_tmux_sessions() {
     let config = tmux_config_path();
+    let prefix = tmux_session_prefix();
     let output = std::process::Command::new("tmux")
         .args([
             "-L",
@@ -1968,7 +2074,7 @@ pub(crate) fn cleanup_orphan_agtower_tmux_sessions() {
     let stdout = String::from_utf8_lossy(&out.stdout);
     for line in stdout.lines() {
         let name = line.trim();
-        if name.starts_with("agtower-") {
+        if tmux_session_belongs_to_prefix(name, prefix) {
             kill_tmux_session(name);
         }
     }
@@ -2099,6 +2205,78 @@ mod tests {
         let mut out = Vec::new();
         strip_startup_noise(data, &mut out);
         out
+    }
+
+    // --- tmux session prefix / orphan-reaper namespace isolation -------------
+
+    #[test]
+    fn prod_identifier_keeps_historical_prefix() {
+        // Backward compat: an upgraded production install must keep naming and
+        // reaping `agtower-<id>` so it still owns pre-existing sessions.
+        assert_eq!(
+            tmux_prefix_for_identifier("com.harflabs.agtower"),
+            PROD_TMUX_PREFIX
+        );
+    }
+
+    #[test]
+    fn dev_identifier_gets_dev_prefix() {
+        assert_eq!(
+            tmux_prefix_for_identifier("com.harflabs.agtower.dev"),
+            DEV_TMUX_PREFIX
+        );
+    }
+
+    #[test]
+    fn unknown_identifier_falls_back_to_prod_prefix() {
+        // Any non-dev identifier defaults to production — never a third
+        // namespace that nothing reaps.
+        assert_eq!(
+            tmux_prefix_for_identifier("com.example.other"),
+            PROD_TMUX_PREFIX
+        );
+        assert_eq!(tmux_prefix_for_identifier(""), PROD_TMUX_PREFIX);
+    }
+
+    #[test]
+    fn prod_reaper_claims_its_own_sessions() {
+        assert!(tmux_session_belongs_to_prefix(
+            "agtower-abc123",
+            PROD_TMUX_PREFIX
+        ));
+    }
+
+    #[test]
+    fn prod_reaper_skips_dev_sessions() {
+        // The critical safety case: `agtower-` is a string-prefix of
+        // `agtower-dev-`, so a naive starts_with would let the production
+        // reaper kill a live dev instance's sessions. It must not.
+        assert!(!tmux_session_belongs_to_prefix(
+            "agtower-dev-abc123",
+            PROD_TMUX_PREFIX
+        ));
+    }
+
+    #[test]
+    fn dev_reaper_claims_only_dev_sessions() {
+        assert!(tmux_session_belongs_to_prefix(
+            "agtower-dev-abc123",
+            DEV_TMUX_PREFIX
+        ));
+        // The dev prefix is strictly more specific, so a bare production
+        // session is never matched by the dev reaper.
+        assert!(!tmux_session_belongs_to_prefix(
+            "agtower-abc123",
+            DEV_TMUX_PREFIX
+        ));
+    }
+
+    #[test]
+    fn reaper_ignores_foreign_sessions() {
+        // User's own / unrelated tmux sessions on the shared socket are never
+        // touched by either reaper.
+        assert!(!tmux_session_belongs_to_prefix("my-work", PROD_TMUX_PREFIX));
+        assert!(!tmux_session_belongs_to_prefix("my-work", DEV_TMUX_PREFIX));
     }
 
     // --- PtyOwnerLease (the attach/reclaim race-prevention core) ---------------
@@ -2330,6 +2508,93 @@ mod tests {
         assert_eq!(rb.snapshot(), b"cdef");
     }
 
+    #[test]
+    fn ring_buffer_offset_tracks_total_bytes() {
+        let mut rb = RingBuffer::new(8);
+        assert_eq!(rb.output_offset(), 0);
+        assert_eq!(rb.push_slice(b"abc"), 3);
+        assert_eq!(rb.output_offset(), 3);
+        assert_eq!(rb.push_slice(b"de"), 5);
+        assert_eq!(rb.output_offset(), 5);
+        // Crossing capacity keeps incrementing the offset even though snapshot
+        // length is clamped to capacity.
+        assert_eq!(rb.push_slice(b"fghij"), 10);
+        assert_eq!(rb.output_offset(), 10);
+    }
+
+    #[test]
+    fn ring_buffer_snapshot_never_ahead_of_offset() {
+        // The bug this guards against: a preview bootstrap that serializes a
+        // snapshot which is AHEAD of the reported offset. Under the same lock
+        // the snapshot+offset pair must always be consistent. Before any wrap
+        // (len < capacity) the snapshot length equals the total bytes pushed,
+        // which equals the offset; after wrap the offset only ever exceeds the
+        // (capped) snapshot length and never goes backwards.
+        let cap = 64usize;
+        let mut rb = RingBuffer::new(cap);
+        let mut total: u64 = 0;
+        let mut prev_offset: u64 = 0;
+        for i in 0..10_000usize {
+            // Vary chunk sizes so the wrap boundary lands at different offsets.
+            let chunk_len = (i % 7) + 1;
+            let chunk = vec![b'x'; chunk_len];
+            let returned = rb.push_slice(&chunk);
+            total += chunk_len as u64;
+
+            // push_slice's return value and the accessor agree.
+            assert_eq!(returned, rb.output_offset());
+            // Offset is exactly the total bytes ever pushed.
+            assert_eq!(rb.output_offset(), total);
+            // Offset is monotonic non-decreasing.
+            assert!(rb.output_offset() >= prev_offset);
+            prev_offset = rb.output_offset();
+
+            let snap_len = rb.snapshot().len() as u64;
+            if rb.output_offset() < cap as u64 {
+                // Not yet wrapped: snapshot bytes == offset exactly. The snapshot
+                // must never be ahead of the offset.
+                assert_eq!(snap_len, rb.output_offset());
+            } else {
+                // Wrapped: snapshot is capped at capacity, offset keeps growing.
+                assert_eq!(snap_len, cap as u64);
+                assert!(rb.output_offset() >= snap_len);
+            }
+        }
+    }
+
+    #[test]
+    fn ring_buffer_concurrent_snapshot_offset_consistency() {
+        // Use a capacity large enough that the writer never wraps, so the
+        // simplest invariant holds: a snapshot+offset captured together under
+        // the lock must satisfy snapshot.len() == offset (snapshot bytes are
+        // never ahead of the reported offset).
+        let iterations = 10_000usize;
+        let chunk: &[u8] = b"abcd";
+        let capacity = iterations * chunk.len() + 16;
+        let rb = Arc::new(Mutex::new(RingBuffer::new(capacity)));
+
+        let writer_rb = Arc::clone(&rb);
+        let writer = std::thread::spawn(move || {
+            for _ in 0..iterations {
+                writer_rb.lock().push_slice(chunk);
+            }
+        });
+
+        // Concurrently mirror get_preview_bootstrap's capture: snapshot + offset
+        // under the same lock. The pair must always be consistent.
+        for _ in 0..iterations {
+            let guard = rb.lock();
+            let snap_len = guard.snapshot().len() as u64;
+            let offset = guard.output_offset();
+            drop(guard);
+            assert_eq!(snap_len, offset);
+        }
+
+        writer.join().expect("writer thread");
+        let guard = rb.lock();
+        assert_eq!(guard.output_offset(), (iterations * chunk.len()) as u64);
+    }
+
     fn seed_manager_with_handle(
         session_id: &str,
         data: &[u8],
@@ -2366,7 +2631,6 @@ mod tests {
                 exit_info: Arc::new(Mutex::new(None)),
                 flow_control: Arc::new(FlowControl::new()),
                 dimensions: Arc::new(Mutex::new((cols, rows))),
-                output_offset: Arc::new(AtomicU64::new(data.len() as u64)),
                 tmux_session_name: None,
                 focus_reporting_enabled: Arc::new(AtomicBool::new(false)),
             },

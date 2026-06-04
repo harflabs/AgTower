@@ -1496,10 +1496,11 @@ html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrol
   user-select: none !important;
   -webkit-user-select: none !important;
 }
-/* The .xterm element is positioned absolute (bottom:0,left:0) by JS so the
- * most recent rows stay visible when the PTY grid is taller than the card.
- * Don't constrain height — let xterm size to its natural canvas height; the
- * card's overflow:hidden clips the overflow above the visible viewport. */
+/* The .xterm element is positioned absolute by JS — anchored bottom for
+ * alt-screen TUIs (most recent rows visible) or top for short normal-buffer
+ * content (see applyContentAnchor in mini-terminal.tsx) — when the PTY grid is
+ * taller than the card. Don't constrain height — let xterm size to its natural
+ * canvas height; the card's overflow:hidden clips the off-anchor overflow. */
 .mini-terminal .xterm {
   padding: 0;
   background: transparent !important;
@@ -1511,11 +1512,11 @@ html[data-platform="default"] .terminal-container .xterm-viewport::-webkit-scrol
 .mini-terminal .xterm-viewport::-webkit-scrollbar {
   display: none;
 }
+/* Previews are non-interactive (disableStdin + inert in mini-terminal.tsx):
+ * the composition textarea and accessibility tree are dead weight per card,
+ * so drop them from layout entirely. */
 .mini-terminal .xterm-helper-textarea,
 .mini-terminal .xterm-accessibility {
-  display: none !important;
-}
-.mini-terminal .xterm-cursor-layer {
   display: none !important;
 }
 
