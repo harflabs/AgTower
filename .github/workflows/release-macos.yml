@@ -43,6 +43,24 @@ jobs:
       - name: Install dependencies
         run: pnpm install --frozen-lockfile
 
+      # The repo keeps a placeholder version (1.0.0); the tag is the single
+      # source of truth for release versions. Inject it before the build so
+      # the About box, bundle Info.plist, and the updater's latest.json all
+      # carry the real version — otherwise every release reports 1.0.0 and
+      # the updater never sees an upgrade (1.0.0 → 1.0.0).
+      - name: Inject tag version into app config
+        run: |
+          VERSION="${GITHUB_REF_NAME#v}"
+          node -e '
+            const fs = require("fs");
+            for (const f of ["package.json", "src-tauri/tauri.conf.json"]) {
+              const j = JSON.parse(fs.readFileSync(f, "utf8"));
+              j.version = process.argv[1];
+              fs.writeFileSync(f, JSON.stringify(j, null, 2) + "\n");
+            }
+          ' "$VERSION"
+          echo "Building as version $VERSION"
+
       - name: Import Apple Developer ID certificate
         env:
           APPLE_CERTIFICATE: ${{ secrets.APPLE_CERTIFICATE }}
