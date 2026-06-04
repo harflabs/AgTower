@@ -70,9 +70,13 @@ export const useSidebarStore = create<SidebarState>()(
                 changed = true;
               }
             }
+            // Return the SAME state object when nothing changed: zustand
+            // short-circuits on Object.is, so neither subscribers nor the
+            // persist middleware do any work. (Returning `{}` would still
+            // produce a fresh state object and re-serialize to localStorage.)
             return changed
               ? { collapsedWorkspaces: next, expandedHistoryByWorkspace: nextHistory }
-              : {};
+              : s;
           }),
         setWorkspaceCollapsed: (repoId, collapsed) =>
           set((s) => ({
