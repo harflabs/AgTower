@@ -50,7 +50,8 @@ class MockTerminal {
   }
 
   // How many leading buffer rows report text — drives applyContentAnchor's
-  // content-tail scan. 0 = empty grid (the placeholder path).
+  // content-tail scan. (The empty-state placeholder is driven by an empty
+  // SNAPSHOT, not by this; 0 here just means an all-blank grid to the scan.)
   contentRows = 0;
 
   // Minimal xterm `buffer.active` shape so applyContentAnchor can scan rows.
