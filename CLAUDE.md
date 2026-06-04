@@ -235,6 +235,32 @@ useUpdaterStore            → in-memory only
 
 ## Important Constraints
 
+### Release CSP: Tauri must NOT modify `style-src` (mini-terminals depend on it)
+
+`tauri.conf.json` sets `"dangerousDisableAssetCspModification": ["style-src"]`. **Never remove it.**
+Tauri release builds rewrite the configured CSP and inject nonces for their own
+assets; per the CSP spec, a nonce in `style-src` makes `'unsafe-inline'` silently
+ignored. xterm's DOM renderer (used by the dashboard mini-terminals; the main
+session terminal is WebGL and unaffected) applies its font family/size and row
+dimensions via a runtime-injected `<style>` element — with the rewritten CSP that
+stylesheet is blocked, the rows silently inherit the app UI font (SF Pro 14px
+inside Menlo-sized 9px rows), and every preview renders squished/overlapping with
+clipped descenders.
+
+Dev builds don't enforce the CSP at all, so this entire bug class **never
+reproduces under `pnpm tauri dev` / `pnpm tauri:dev`**. To test the real release
+rendering path side-by-side with an installed production app:
+
+```bash
+pnpm tauri build --bundles app --config src-tauri/tauri.dev.conf.json \
+  --config '{"bundle":{"createUpdaterArtifacts":false}}'
+open "src-tauri/target/release/bundle/macos/AgTower Dev.app"
+```
+
+`script-src` intentionally keeps Tauri's nonce protection; only `style-src` is
+exempted. Terminal output is rendered as text nodes (never HTML), so PTY bytes
+cannot inject styles.
+
 ### HTML5 Drag and Drop Does NOT Work in Tauri v2
 
 Tauri v2's `wry` layer (`WryWebView`) overrides macOS `NSDraggingDestination` methods and always returns `true`, preventing `WKWebView` from forwarding drag events to JavaScript. Pointer-event-based libraries (`@dnd-kit`) and our own mouse-based drag hook work correctly; native HTML5 DnD (`onDrag*`) does not.
