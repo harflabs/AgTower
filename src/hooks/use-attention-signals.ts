@@ -1,6 +1,7 @@
 import { invoke } from "@tauri-apps/api/core";
 import { getCurrentWindow, UserAttentionType } from "@tauri-apps/api/window";
 import { useEffect, useRef, useState } from "react";
+import { deriveAttentionSignals } from "@/hooks/use-attention-signals-helpers";
 import { HAS_TAURI_RUNTIME, IS_MACOS } from "@/lib/platform";
 import { useSessionStore } from "@/stores/session-store";
 
@@ -28,35 +29,33 @@ export function useAttentionSignals() {
     };
   }, []);
 
-  // Don't count the session the user is actively viewing while the window is
-  // focused — its toast is already suppressed (notifications.ts), so the badge
-  // should agree. When the window is backgrounded, count it again so a blocked
-  // agent still shows on the dock.
-  const needsAttentionCount =
-    windowFocused && activeIsAttention ? Math.max(0, rawCount - 1) : rawCount;
-
-  const previousCountRef = useRef(needsAttentionCount);
+  // Edge detection tracks the RAW count — see deriveAttentionSignals for why
+  // the bounce must not key off the focus-adjusted badge count.
+  const previousRawCountRef = useRef(rawCount);
 
   useEffect(() => {
     if (!HAS_TAURI_RUNTIME) return;
 
     const currentWindow = getCurrentWindow();
+    const { badgeCount, requestAttention } = deriveAttentionSignals({
+      rawCount,
+      previousRawCount: previousRawCountRef.current,
+      activeIsAttention,
+      windowFocused,
+    });
 
-    invoke("update_tray_count", { count: needsAttentionCount }).catch(console.error);
+    invoke("update_tray_count", { count: badgeCount }).catch(console.error);
     currentWindow
-      .setBadgeLabel(needsAttentionCount > 0 ? String(needsAttentionCount) : undefined)
+      .setBadgeLabel(badgeCount > 0 ? String(badgeCount) : undefined)
       .catch(console.error);
 
-    // Fire on every increase in the blocked-agent count, not just the 0→positive
-    // edge, so a newly-blocked second/third agent still alerts instead of only
-    // bumping the badge number silently.
-    if (IS_MACOS && needsAttentionCount > previousCountRef.current) {
+    if (IS_MACOS && requestAttention) {
       // Critical bounces the dock icon until the user focuses the app.
       // Informational only bounces once — not enough signal for an agent
       // that's blocked waiting on input and may sit idle for minutes.
       currentWindow.requestUserAttention(UserAttentionType.Critical).catch(console.error);
     }
 
-    previousCountRef.current = needsAttentionCount;
-  }, [needsAttentionCount]);
+    previousRawCountRef.current = rawCount;
+  }, [rawCount, activeIsAttention, windowFocused]);
 }
