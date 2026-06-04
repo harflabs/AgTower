@@ -202,15 +202,30 @@ export function buildOpenSessionCyclePreview(
   ctx: PaletteContext,
   direction: "next" | "prev",
 ): PalettePreviewData | undefined {
-  const target = resolveAdjacentOpenSessionTarget(ctx.sessions, ctx.activeSessionId, direction);
-  if (target?.kind !== "session") return undefined;
+  const target = resolveAdjacentOpenSessionTarget(
+    ctx.sessions,
+    ctx.activeSessionId,
+    direction,
+    ctx.isOnDashboard,
+  );
+  if (!target) return undefined;
+
+  const title = direction === "next" ? "Next Open Session" : "Previous Open Session";
+
+  if (target.kind === "dashboard") {
+    return {
+      title,
+      summary: "Switch to the Dashboard.",
+      sections: [{ label: "Target", value: "Dashboard" }],
+    };
+  }
 
   const session = ctx.sessions[target.sessionId];
   const repo = session ? ctx.repos[session.repoId] : null;
   if (!session) return undefined;
 
   return {
-    title: direction === "next" ? "Next Open Session" : "Previous Open Session",
+    title,
     summary: `Switch to ${session.title || "Untitled Session"}.`,
     sections: [
       { label: "Target", value: session.title || "Untitled Session" },

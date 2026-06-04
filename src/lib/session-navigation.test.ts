@@ -159,7 +159,7 @@ describe("resolveAdjacentOpenSessionTarget", () => {
     });
   });
 
-  it("wraps to the end when moving backward without an active open session", () => {
+  it("moves backward to the dashboard without an active open session", () => {
     const newest = makeSession({
       createdAt: 30,
       id: "newest",
@@ -182,10 +182,126 @@ describe("resolveAdjacentOpenSessionTarget", () => {
       "prev",
     );
 
+    expect(target).toEqual({ kind: "dashboard" });
+  });
+
+  it("cycles from the oldest open session to the dashboard", () => {
+    const newest = makeSession({
+      createdAt: 30,
+      id: "newest",
+      repoId: "repo-newest",
+      status: "running",
+    });
+    const oldest = makeSession({
+      createdAt: 10,
+      id: "oldest",
+      repoId: "repo-oldest",
+      status: "idle",
+    });
+
+    const target = resolveAdjacentOpenSessionTarget({ newest, oldest }, "oldest", "next");
+
+    expect(target).toEqual({ kind: "dashboard" });
+  });
+
+  it("cycles backward from the newest open session to the dashboard", () => {
+    const newest = makeSession({
+      createdAt: 30,
+      id: "newest",
+      repoId: "repo-newest",
+      status: "running",
+    });
+    const oldest = makeSession({
+      createdAt: 10,
+      id: "oldest",
+      repoId: "repo-oldest",
+      status: "idle",
+    });
+
+    const target = resolveAdjacentOpenSessionTarget({ newest, oldest }, "newest", "prev");
+
+    expect(target).toEqual({ kind: "dashboard" });
+  });
+
+  it("wraps from the dashboard to the newest open session", () => {
+    const newest = makeSession({
+      createdAt: 30,
+      id: "newest",
+      repoId: "repo-newest",
+      status: "running",
+    });
+    const oldest = makeSession({
+      createdAt: 10,
+      id: "oldest",
+      repoId: "repo-oldest",
+      status: "idle",
+    });
+
+    const target = resolveAdjacentOpenSessionTarget({ newest, oldest }, null, "next", true);
+
+    expect(target).toEqual({
+      kind: "session",
+      repoId: "repo-newest",
+      sessionId: "newest",
+    });
+  });
+
+  it("cycles backward from the dashboard to the oldest open session", () => {
+    const newest = makeSession({
+      createdAt: 30,
+      id: "newest",
+      repoId: "repo-newest",
+      status: "running",
+    });
+    const oldest = makeSession({
+      createdAt: 10,
+      id: "oldest",
+      repoId: "repo-oldest",
+      status: "idle",
+    });
+
+    const target = resolveAdjacentOpenSessionTarget({ newest, oldest }, null, "prev", true);
+
     expect(target).toEqual({
       kind: "session",
       repoId: "repo-oldest",
       sessionId: "oldest",
+    });
+  });
+
+  it("toggles between a lone open session and the dashboard", () => {
+    const only = makeSession({
+      createdAt: 30,
+      id: "only",
+      repoId: "repo-only",
+      status: "running",
+    });
+
+    expect(resolveAdjacentOpenSessionTarget({ only }, "only", "next")).toEqual({
+      kind: "dashboard",
+    });
+    expect(resolveAdjacentOpenSessionTarget({ only }, null, "next", true)).toEqual({
+      kind: "session",
+      repoId: "repo-only",
+      sessionId: "only",
+    });
+  });
+
+  it("is a no-op on the dashboard when no sessions are open", () => {
+    const closed = makeSession({ createdAt: 10, id: "closed", status: "closed" });
+
+    expect(resolveAdjacentOpenSessionTarget({ closed }, null, "next", true)).toBeNull();
+    expect(resolveAdjacentOpenSessionTarget({ closed }, null, "prev", true)).toBeNull();
+  });
+
+  it("falls back to the dashboard from a closed session when no sessions are open", () => {
+    const closed = makeSession({ createdAt: 10, id: "closed", status: "closed" });
+
+    expect(resolveAdjacentOpenSessionTarget({ closed }, "closed", "next")).toEqual({
+      kind: "dashboard",
+    });
+    expect(resolveAdjacentOpenSessionTarget({ closed }, "closed", "prev")).toEqual({
+      kind: "dashboard",
     });
   });
 });

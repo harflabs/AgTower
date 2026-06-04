@@ -68,26 +68,45 @@ export function resolveCloseCurrentSessionTarget(
   return { kind: "dashboard" };
 }
 
+/**
+ * Resolves one step of the open-session cycle (Ctrl+Tab and friends). The
+ * dashboard occupies a single extra slot after the oldest open session, so
+ * cycling forward walks newest → oldest → dashboard → newest. When the
+ * current location is neither the dashboard nor an open session (settings,
+ * a closed-session preview), it is treated as the dashboard/newest seam:
+ * next → newest session, prev → dashboard.
+ */
 export function resolveAdjacentOpenSessionTarget(
   sessions: Record<string, Session>,
   currentSessionId: string | null | undefined,
   direction: "next" | "prev",
+  onDashboard = false,
 ): SessionNavigationTarget | null {
   const openSessions = getOpenSessionsByRecency(sessions);
-  if (openSessions.length === 0) return null;
+  const dashboardIndex = openSessions.length;
+  const cycleLength = dashboardIndex + 1;
 
-  const currentIndex = currentSessionId
-    ? openSessions.findIndex((session) => session.id === currentSessionId)
-    : -1;
+  const currentIndex = onDashboard
+    ? dashboardIndex
+    : currentSessionId
+      ? openSessions.findIndex((session) => session.id === currentSessionId)
+      : -1;
 
   const targetIndex =
     currentIndex < 0
       ? direction === "next"
         ? 0
-        : openSessions.length - 1
+        : cycleLength - 1
       : direction === "next"
-        ? (currentIndex + 1) % openSessions.length
-        : (currentIndex - 1 + openSessions.length) % openSessions.length;
+        ? (currentIndex + 1) % cycleLength
+        : (currentIndex - 1 + cycleLength) % cycleLength;
+
+  // A one-entry cycle (dashboard with no open sessions) resolves to itself.
+  if (targetIndex === currentIndex) return null;
+
+  if (targetIndex === dashboardIndex) {
+    return { kind: "dashboard" };
+  }
 
   const target = openSessions[targetIndex];
   if (!target) return null;

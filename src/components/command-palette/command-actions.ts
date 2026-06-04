@@ -337,6 +337,7 @@ function createCoreCommands(ctx: PaletteContext): PaletteItem[] {
           runtime.sessions,
           runtime.activeSessionId,
           "next",
+          runtime.isOnDashboard,
         );
         if (target) {
           navigateToSessionTarget(target, runtime.navigate);
@@ -361,6 +362,7 @@ function createCoreCommands(ctx: PaletteContext): PaletteItem[] {
           runtime.sessions,
           runtime.activeSessionId,
           "prev",
+          runtime.isOnDashboard,
         );
         if (target) {
           navigateToSessionTarget(target, runtime.navigate);

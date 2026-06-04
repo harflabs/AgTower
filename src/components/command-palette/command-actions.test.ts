@@ -85,6 +85,7 @@ function createContext(overrides: Partial<PaletteContext> = {}): PaletteContext 
     activeSessionId: null,
     addRepository: async () => null,
     clearSessionCache: async () => {},
+    isOnDashboard: false,
     isOnSession: false,
     navigate: vi.fn(),
     providers: [
