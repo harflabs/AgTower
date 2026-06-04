@@ -20,6 +20,10 @@ type InternalTerminal = Terminal & {
   _core?: {
     _renderService?: InternalRenderService;
     screenElement?: HTMLElement;
+    // Set true by the parser on `CSI ?2026h` and cleared on `?2026l` (or the
+    // 1s safety timeout). While true, RenderService buffers frames instead of
+    // painting them, so a stranded `?2026h` keeps the grid blank.
+    coreService?: { decPrivateModes?: { synchronizedOutput?: boolean } };
   };
 };
 
@@ -64,34 +68,41 @@ export function forceTerminalRender(term: Terminal, options: ForceRenderOptions 
     renderService._needsFullRefresh = true;
     return;
   }
-  const synchronizedOutput = term.modes?.synchronizedOutputMode === true;
 
   options.clearTextureAtlas?.();
   renderService._pausedResizeTask?.flush?.();
   renderService._isPaused = false;
   renderService._needsFullRefresh = false;
 
-  if (synchronizedOutput) {
-    if (typeof renderService.refreshRows === "function") {
-      renderService.refreshRows(0, lastRow, true);
-      return;
-    }
-
-    if (typeof renderService._renderRows === "function") {
-      renderService._isNextRenderRedrawOnly = true;
-      renderService._renderRows(0, lastRow);
-      return;
-    }
-  }
-
+  // Paint the current buffer straight to the DOM renderer. xterm normally
+  // reaches the renderer through RenderService, which can be gated by stale
+  // IntersectionObserver pause state OR by synchronized-output buffering. This
+  // integrity path only runs after our own visible layout/write signals, so a
+  // direct renderRows is the safest way to guarantee the grid is on screen.
+  //
+  // Why this also handles synchronized output (DEC 2026): a partial frame can
+  // strand the terminal mid-`?2026h` (e.g. a coalesced delta batch ends right
+  // after the open and the closing `?2026l` lands in a later batch, or never if
+  // the session goes quiet). While the mode is set, RenderService.refreshRows
+  // only buffers — it never paints — and if `_isPaused` flips true before the 1s
+  // safety timeout fires, the buffered frame is deferred to `_needsFullRefresh`
+  // and only flushes on the next IntersectionObserver callback, which a
+  // statically-visible card never gets. The result is a permanently blank mini
+  // even though a non-empty snapshot was written. Painting the current grid
+  // directly avoids that dead-end; the next real frame repaints it correctly.
   const renderer = renderService._renderer?.value;
   if (typeof renderer?.renderRows === "function") {
-    // xterm normally reaches the renderer through RenderService, which can be
-    // gated by stale IntersectionObserver state. This integrity path is only
-    // used after our own visible layout/write signals, so call the renderer
-    // directly unless synchronized output needs xterm's buffering semantics.
     renderer.renderRows(0, lastRow);
     return;
+  }
+
+  // Fallbacks for builds where the private renderer handle is unavailable.
+  // refreshRows still buffers under synchronized output, so clear the mode
+  // first when it's set — the next live delta's own `?2026h` re-enters sync,
+  // and a redraw-only flush of the current grid never tears a static preview.
+  const core = (term as InternalTerminal)._core;
+  if (core?.coreService?.decPrivateModes?.synchronizedOutput === true) {
+    core.coreService.decPrivateModes.synchronizedOutput = false;
   }
 
   if (typeof renderService._renderRows === "function") {

@@ -90,10 +90,19 @@ pub fn run() {
             // export it on PATH. Same resolution strategy as tmux config.
             pty_manager::init_bundled_bin_dir(app.handle());
 
-            // Reap any `agtower-*` tmux sessions left over from a previous
-            // run (crash, force-quit, etc.). This runs before PtyManager
-            // creates any new sessions, so by definition anything matching
-            // our naming scheme at this point is orphaned state we own.
+            // Derive this instance's tmux session prefix from its bundle
+            // identifier (`agtower-` for production, `agtower-dev-` for a
+            // side-by-side dev instance). Must run before both the orphan
+            // reaper below and any later `create_session`, since both rely on
+            // the cached prefix.
+            pty_manager::init_tmux_session_prefix(app.handle());
+
+            // Reap tmux sessions carrying THIS instance's prefix left over from
+            // a previous run (crash, force-quit, etc.). This runs before
+            // PtyManager creates any new sessions, so by definition anything
+            // matching our prefix at this point is orphaned state we own. The
+            // prefix scoping deliberately skips a side-by-side instance's
+            // sessions (e.g. production never reaps `agtower-dev-*`).
             pty_manager::cleanup_orphan_agtower_tmux_sessions();
 
             app.manage(AppState {

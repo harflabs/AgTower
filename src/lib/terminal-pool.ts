@@ -311,25 +311,12 @@ function buildPreviewSnapshot(
   };
 }
 
-function capSnapshotData(data: Uint8Array): Uint8Array {
-  if (data.length <= PREVIEW_SNAPSHOT_MAX_BYTES) return data;
-  return data.slice(data.length - PREVIEW_SNAPSHOT_MAX_BYTES);
-}
-
-function appendSnapshotData(current: Uint8Array, next: Uint8Array): Uint8Array {
-  if (next.length === 0) return current;
-  if (current.length === 0) return capSnapshotData(next);
-
-  if (next.length >= PREVIEW_SNAPSHOT_MAX_BYTES) {
-    return next.slice(next.length - PREVIEW_SNAPSHOT_MAX_BYTES);
-  }
-
-  const keepCurrent = Math.max(0, PREVIEW_SNAPSHOT_MAX_BYTES - next.length);
-  const currentTail =
-    current.length > keepCurrent ? current.slice(current.length - keepCurrent) : current;
-  const merged = new Uint8Array(currentTail.length + next.length);
-  merged.set(currentTail, 0);
-  merged.set(next, currentTail.length);
+function concatBytes(a: Uint8Array, b: Uint8Array): Uint8Array {
+  if (a.length === 0) return b;
+  if (b.length === 0) return a;
+  const merged = new Uint8Array(a.length + b.length);
+  merged.set(a, 0);
+  merged.set(b, a.length);
   return merged;
 }
 
@@ -389,12 +376,37 @@ function notifyParkedBroadcastObservers(sessionId: string, data: Uint8Array): vo
 
 function emitPreviewDelta(source: PreviewSourceState, data: Uint8Array): void {
   if (source.disposed || data.length === 0) return;
+
+  // The served snapshot is a SerializeAddon stream (a self-contained grid using
+  // only relative cursor moves) followed by a CLEANLY concatenated raw-delta
+  // tail. We must never front-slice this blob: slicing would evict part of the
+  // serialized base — or cut mid-escape / mid-UTF-8 — and a late subscriber
+  // would then receive a preamble-less, garbled snapshot. So we only append by
+  // clean concatenation while it stays under the cap; once appending would
+  // overflow we leave the snapshot untouched (it remains a valid stream) and
+  // schedule a full resync, which rebuilds a fresh, bounded serialized snapshot.
   if (source.currentSnapshot) {
-    source.currentSnapshot = {
-      ...source.currentSnapshot,
-      data: appendSnapshotData(source.currentSnapshot.data, data),
-    };
+    const wouldExceed =
+      source.currentSnapshot.data.length + data.length > PREVIEW_SNAPSHOT_MAX_BYTES;
+    if (wouldExceed) {
+      // Don't append this tick — keep the snapshot a valid serialized stream.
+      // notify=true is REQUIRED: a resync bumps source.revision, and the mini
+      // drops any delta whose revision != its current revision. Without an
+      // onReset to re-sync attached subscribers to the new revision, every
+      // later delta would be silently dropped and the preview would freeze.
+      // queuePreviewResync coalesces via resyncPromise; the guard avoids
+      // re-queuing pendingNotify churn on every overflowing tick.
+      if (!source.resyncPromise) void queuePreviewResync(source, true);
+    } else {
+      source.currentSnapshot = {
+        ...source.currentSnapshot,
+        data: concatBytes(source.currentSnapshot.data, data),
+      };
+    }
   }
+
+  // Live subscribers apply the delta on top of their already-rendered grid, so
+  // they always receive it regardless of snapshot accumulation.
   const event: PreviewSourceDelta = {
     revision: source.revision,
     data,
@@ -626,15 +638,31 @@ function getPreviewSourceState(
   stateHint: PtySessionState | null,
   bootstrap: PtyPreviewBootstrap | null,
 ): PtySessionState {
-  const currentState = source.currentSnapshot
-    ? {
-        processState: source.currentSnapshot.processState,
-        attachmentState: source.currentSnapshot.attachmentState,
-        cols: source.currentSnapshot.cols,
-        rows: source.currentSnapshot.rows,
-      }
-    : defaultPreviewState(source.mode);
-  return stateHint ?? stateFromBootstrap(bootstrap, currentState);
+  if (source.currentSnapshot) {
+    const currentState = {
+      processState: source.currentSnapshot.processState,
+      attachmentState: source.currentSnapshot.attachmentState,
+      cols: source.currentSnapshot.cols,
+      rows: source.currentSnapshot.rows,
+    };
+    return stateHint ?? stateFromBootstrap(bootstrap, currentState);
+  }
+
+  // No prior snapshot. With a hint or a bootstrap, those win as before.
+  if (stateHint || bootstrap) {
+    return stateHint ?? stateFromBootstrap(bootstrap, defaultPreviewState(source.mode));
+  }
+
+  // No hint, no bootstrap, no prior snapshot: get_preview_bootstrap returned
+  // null because the session has no PtyHandle yet (a lazy PTY that hasn't been
+  // opened, or one killed-and-not-yet-recreated by a restart). defaultPreviewState
+  // hardcodes 'terminated', which would mislabel a live session as an external
+  // CLI session in the preview. Derive the process state from the session store
+  // instead so a live session shows the running placeholder; the pty-state
+  // broadcast re-resyncs once the PTY actually appears.
+  const storeStatus = useSessionStore.getState().sessions[source.sessionId]?.status;
+  const live = storeStatus !== undefined && storeStatus !== "closed" && storeStatus !== "archived";
+  return { ...defaultPreviewState(source.mode), processState: live ? "running" : "terminated" };
 }
 
 function captureLiveSnapshot(source: PreviewSourceState): PreviewSourceSnapshot | null {
@@ -685,6 +713,17 @@ async function buildHeadlessSnapshot(
     headless.terminal.resize(state.cols, state.rows);
   }
   await writeTerminalBytes(headless.terminal, snapshotData);
+  // This write is the one suspension point after the headless terminal exists:
+  // the last subscriber can unsubscribe mid-write, in which case
+  // destroyPreviewSource has already disposed the terminal and nulled
+  // source.headless. Serializing the disposed instance below would throw out
+  // of the resync promise, so bail with the fallback instead of touching it.
+  if (source.disposed || source.headless !== headless) {
+    return (
+      source.currentSnapshot ??
+      buildPreviewSnapshot(defaultPreviewState(source.mode), new Uint8Array(0), source.revision)
+    );
+  }
   dropQueuedChunksThroughOffset(source, bootstrap?.outputOffset ?? null);
   source.headlessPaused = false;
   if (source.pendingWriteChunks.length > 0) {
@@ -887,11 +926,27 @@ export async function subscribeToPreviewSource(
 
   source.listeners.add(listener);
   ensurePreviewMetaListener(source);
-  const snapshot = source.resyncPromise
-    ? await source.resyncPromise
-    : (captureLiveSnapshot(source) ??
-      source.currentSnapshot ??
-      (await queuePreviewResync(source, false)));
+  let snapshot: PreviewSourceSnapshot;
+  try {
+    snapshot = source.resyncPromise
+      ? await source.resyncPromise
+      : (captureLiveSnapshot(source) ??
+        source.currentSnapshot ??
+        (await queuePreviewResync(source, false)));
+  } catch (error) {
+    // A failed initial snapshot must not leave the listener registered with no
+    // unsubscribe handle returned to the caller: it would leak for the
+    // source's lifetime and double-deliver every delta once the caller
+    // retries. Identity-check the map entry — the source may have been
+    // destroyed and recreated by another subscriber while we were suspended.
+    if (previewSources.get(sessionId) === source) {
+      source.listeners.delete(listener);
+      if (source.listeners.size === 0) {
+        destroyPreviewSource(sessionId);
+      }
+    }
+    throw error;
+  }
   source.currentSnapshot = snapshot;
 
   return {

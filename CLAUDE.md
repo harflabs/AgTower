@@ -27,7 +27,8 @@ AgTower is a Tauri v2 desktop app (Rust + React 19) for managing and monitoring 
 
 ```bash
 pnpm install              # Install dependencies
-pnpm tauri dev            # Dev server + Rust backend (main dev workflow)
+pnpm tauri:dev            # Dev server + Rust backend, ISOLATED from a prod install (main dev workflow)
+pnpm tauri dev            # Same, but shares prod's identity/data — only safe when no prod app is installed
 pnpm dev                  # Vite only (no Tauri)
 pnpm build                # TypeScript + Vite bundle
 pnpm build:mac            # Ad-hoc signed .app bundle
@@ -39,6 +40,33 @@ pnpm lint:dead            # Knip dead code detection
 pnpm format               # Biome format
 pnpm check                # Full pipeline: lint + dead + test + build + cargo fmt/clippy/test
 ```
+
+### Dev-instance isolation
+
+`pnpm tauri:dev` overlays `src-tauri/tauri.dev.conf.json` (via `tauri dev --config`)
+so a development build can run side-by-side with an installed production app:
+
+- **identifier** → `com.harflabs.agtower.dev`, **productName** → `AgTower Dev`.
+  This gives the dev build its own single-instance scope, app-data dir
+  (`~/Library/Application Support/com.harflabs.agtower.dev`), control socket, and
+  SQLite DB — so dev never deletes/rebinds prod's `control.sock` or shares its
+  `agtower.db`.
+- **tmux session prefix** is derived from the identifier in
+  `src-tauri/src/pty_manager.rs` (`tmux_prefix_for_identifier`): prod keeps the
+  historical `agtower-` prefix; the `.dev` identifier uses `agtower-dev-`. Both
+  builds share the same `-L agtower` tmux socket, so the startup orphan reaper
+  (`cleanup_orphan_agtower_tmux_sessions`) must discriminate by prefix —
+  `tmux_session_belongs_to_prefix` makes prod skip `agtower-dev-*` (a naive
+  `agtower-*` glob would match and kill them) and vice versa.
+- **deep-link scheme** → `agtower-dev://` (prod stays `agtower://`), avoiding a
+  macOS URL-scheme handler collision between the two installs.
+- The plain `pnpm tauri dev` path (no overlay) and `pnpm tauri build` (prod) are
+  unchanged.
+
+Known remaining sharing (intentional, not yet split): both builds use the same
+`-L agtower` tmux server socket (isolation is by session-name prefix, above) and
+register the same global summon shortcut (`Cmd+Ctrl+A`) — whichever instance
+registers first wins; the loser logs and continues.
 
 ## Project Structure
 
@@ -276,7 +304,8 @@ Caveats: native `NSMenu` items are text-only (no icons rendered consistently acr
 ## Environment
 
 - Dev server: `http://localhost:1420`
-- App data: `~/Library/Application Support/com.harflabs.agtower` (macOS)
+- App data (prod): `~/Library/Application Support/com.harflabs.agtower` (macOS)
+- App data (`pnpm tauri:dev`): `~/Library/Application Support/com.harflabs.agtower.dev`
 - Claude projects: `~/.claude/projects/`
 - Codex sessions: `~/.codex/sessions/`
 - Platform detection: `src/lib/platform.ts` (`IS_MACOS`, `HAS_TAURI_RUNTIME`)
