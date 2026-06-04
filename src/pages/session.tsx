@@ -10,6 +10,7 @@ import { SplitPaneContainer } from "@/components/session/split-pane-container";
 import { SESSION_DROP_EVENT, type SessionDropDetail } from "@/hooks/use-session-drag";
 import { useWindowTitle } from "@/hooks/use-window-title";
 import { saveWorkspaceState } from "@/lib/engine";
+import { sessionDisplayTitle } from "@/lib/session-helpers";
 import {
   closeCurrentSessionAndAdvance,
   resolveCloseCurrentSessionTarget,
@@ -134,7 +135,9 @@ export default function Session() {
   const effectiveSession = effectiveSessionId ? sessions[effectiveSessionId] : undefined;
 
   useWindowTitle(
-    effectiveSession ? `AgTower — ${effectiveSession.title}` : "AgTower — Session not found",
+    effectiveSession
+      ? `AgTower — ${sessionDisplayTitle(effectiveSession)}`
+      : "AgTower — Session not found",
   );
 
   const [deleteTargetId, setDeleteTargetId] = useState<string | null>(null);
@@ -407,7 +410,7 @@ export default function Session() {
         <DeleteSessionDialog
           open={deleteTargetId !== null}
           onOpenChange={(open) => !open && setDeleteTargetId(null)}
-          sessionTitle={deleteTargetSession?.title ?? ""}
+          sessionTitle={deleteTargetSession ? sessionDisplayTitle(deleteTargetSession) : ""}
           onConfirm={handleDeleteSession}
         />
       </div>
@@ -433,7 +436,7 @@ export default function Session() {
       <DeleteSessionDialog
         open={deleteTargetId !== null}
         onOpenChange={(open) => !open && setDeleteTargetId(null)}
-        sessionTitle={deleteTargetSession?.title ?? ""}
+        sessionTitle={deleteTargetSession ? sessionDisplayTitle(deleteTargetSession) : ""}
         onConfirm={handleDeleteSession}
       />
     </div>

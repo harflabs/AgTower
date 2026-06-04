@@ -124,6 +124,19 @@
   }
 }
 
+/* "Look here" ping for needsAttention: an outward-expanding warning ring,
+   distinct in kind from pulse-dot's scale/opacity heartbeat so a blocked
+   agent never reads the same as a happily-running one. */
+@keyframes attention-glow {
+  0%,
+  100% {
+    box-shadow: 0 0 0 0 oklch(from var(--warning) l c h / 0.5);
+  }
+  50% {
+    box-shadow: 0 0 0 3px oklch(from var(--warning) l c h / 0);
+  }
+}
+
 @keyframes collapsible-down {
   from {
     height: 0;
@@ -161,6 +174,7 @@
 
 @theme inline {
     --animate-pulse-dot: pulse-dot 2s ease-in-out infinite;
+    --animate-attention-glow: attention-glow 2s ease-in-out infinite;
     --animate-collapsible-down: collapsible-down 150ms ease-out;
     --animate-collapsible-up: collapsible-up 150ms ease-out;
     --font-sans: var(--font-sans-stack);
@@ -236,6 +250,18 @@
 /* Promote pulse-dot animations to GPU compositor layer to avoid layout reflows */
 .animate-pulse-dot {
   will-change: transform, opacity;
+}
+
+/* (attention-glow animates box-shadow, a paint-driven property — there is no
+   compositor layer to promote, so no will-change hint for it.) */
+
+/* Reduce Motion: drop the continuous status animations. The dot color,
+   size, and left-edge accent still encode status without motion. */
+@media (prefers-reduced-motion: reduce) {
+  .animate-pulse-dot,
+  .animate-attention-glow {
+    animation: none;
+  }
 }
 
 /*
@@ -502,6 +528,15 @@ html[data-platform="macos"][data-window-active="false"].dark {
   background: var(--sidebar);
   backdrop-filter: saturate(180%) blur(10px);
   -webkit-backdrop-filter: saturate(180%) blur(10px);
+}
+
+/* The hover popovers inside a header (the "+ New Session" provider badge)
+   drop below the header's own box — without this they render underneath the
+   NEXT workspace's sticky header and get frosted by its backdrop-filter.
+   Elevate the interacted header above its sibling headers. */
+.sidebar-workspace-header-sticky:hover,
+.sidebar-workspace-header-sticky:focus-within {
+  z-index: 20;
 }
 
 /* ── Fullscreen on macOS ──

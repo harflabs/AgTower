@@ -17,8 +17,13 @@ interface SidebarState {
   setSidebarWidth: (w: number) => void;
   setSidebarOpen: (open: boolean) => void;
   toggleSidebar: () => void;
-  toggleWorkspaceCollapsed: (repoId: string) => void;
   setWorkspaceCollapsed: (repoId: string, collapsed: boolean) => void;
+  /**
+   * Drop explicit collapse overrides so the listed workspaces revert to the
+   * status-derived default (expanded only while running/needs-attention).
+   * Called once per app launch so quiet repos start collapsed.
+   */
+  clearWorkspaceCollapseOverrides: (repoIds: string[]) => void;
   toggleWorkspaceHistory: (repoId: string) => void;
   togglePinnedSession: (sessionId: string) => void;
   setSessionPinned: (sessionId: string, pinned: boolean) => void;
@@ -47,24 +52,27 @@ export const useSidebarStore = create<SidebarState>()(
         setSidebarWidth: (w) => set({ sidebarWidth: Math.max(256, Math.min(480, w)) }),
         setSidebarOpen: (open) => set({ sidebarOpen: open }),
         toggleSidebar: () => set((s) => ({ sidebarOpen: !s.sidebarOpen })),
-        toggleWorkspaceCollapsed: (repoId) =>
+        clearWorkspaceCollapseOverrides: (repoIds) =>
           set((s) => {
-            const nowCollapsed = !(s.collapsedWorkspaces[repoId] ?? true);
-            return {
-              collapsedWorkspaces: {
-                ...s.collapsedWorkspaces,
-                [repoId]: nowCollapsed,
-              },
-              // Reset history when collapsing
-              ...(nowCollapsed && s.expandedHistoryByWorkspace[repoId]
-                ? {
-                    expandedHistoryByWorkspace: {
-                      ...s.expandedHistoryByWorkspace,
-                      [repoId]: false,
-                    },
-                  }
-                : {}),
-            };
+            const next = { ...s.collapsedWorkspaces };
+            const nextHistory = { ...s.expandedHistoryByWorkspace };
+            let changed = false;
+            for (const repoId of repoIds) {
+              if (repoId in next) {
+                delete next[repoId];
+                changed = true;
+              }
+              // Mirror setWorkspaceCollapsed: a workspace reverting to the
+              // collapsed default also forgets its expanded history, so the
+              // next manual expand starts from "Show more (N)".
+              if (nextHistory[repoId]) {
+                nextHistory[repoId] = false;
+                changed = true;
+              }
+            }
+            return changed
+              ? { collapsedWorkspaces: next, expandedHistoryByWorkspace: nextHistory }
+              : {};
           }),
         setWorkspaceCollapsed: (repoId, collapsed) =>
           set((s) => ({

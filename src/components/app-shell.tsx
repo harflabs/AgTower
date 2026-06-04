@@ -43,6 +43,7 @@ import { useSystemAccentColor } from "@/hooks/use-system-accent-color";
 import { useUpdater } from "@/hooks/use-updater";
 import { useWindowActiveState } from "@/hooks/use-window-active-state";
 import { IS_MACOS } from "@/lib/platform";
+import { sessionDisplayTitle } from "@/lib/session-helpers";
 import { resolveToolbarMeta } from "@/lib/toolbar-meta";
 import { cn } from "@/lib/utils";
 import { discoverCliSessions } from "@/providers/claude-code/discovery";
@@ -101,7 +102,7 @@ function useToolbarMeta() {
     repoCount,
     search: location.search,
     sessionRepoName: session?.repoName ?? null,
-    sessionTitle: session?.title ?? null,
+    sessionTitle: session ? sessionDisplayTitle(session) : null,
   });
 }
 
