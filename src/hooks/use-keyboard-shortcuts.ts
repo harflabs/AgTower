@@ -159,6 +159,7 @@ export function useKeyboardShortcuts(
             useSessionStore.getState().sessions,
             useSessionStore.getState().activeSessionId,
             actionId === "next-open-session" ? "next" : "prev",
+            location.pathname === "/",
           );
           if (target) {
             navigateToSessionTarget(target, navigate);
@@ -241,7 +242,7 @@ export function useKeyboardShortcuts(
           break;
       }
     },
-    [executeCommand, navigate],
+    [executeCommand, navigate, location.pathname],
   );
 
   useEffect(() => {

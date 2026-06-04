@@ -60,6 +60,9 @@ export interface PaletteContext {
   activeRepoId: string | null;
   activeRepo: Repository | null;
   isOnSession: boolean;
+  /** True when the palette was opened from the dashboard route — the
+   *  dashboard occupies one slot in the open-session cycle. */
+  isOnDashboard: boolean;
   sessions: Record<string, Session>;
   repos: Record<string, Repository>;
   providers: ProviderModule[];

@@ -399,6 +399,7 @@ function MountedCommandPalette({ setOpen }: { setOpen: (open: boolean) => void }
       activeSessionId,
       addRepository,
       clearSessionCache,
+      isOnDashboard: location.pathname === "/",
       isOnSession: location.pathname.startsWith("/session/") && Boolean(activeSessionId),
       navigate,
       providers,
