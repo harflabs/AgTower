@@ -1,3 +1,4 @@
+import { sessionDisplayTitle } from "@/lib/session-helpers";
 import { useRepoStore } from "@/stores/repo-store";
 import type { SessionStatus } from "@/types/session";
 import {
@@ -44,7 +45,7 @@ export function createSessionItems(ctx: PaletteContext): PaletteItem[] {
     return {
       id: `session:${session.id}`,
       kind: "session",
-      title: session.title || "Untitled Session",
+      title: sessionDisplayTitle(session),
       subtitle,
       activity,
       isCurrent: session.id === ctx.activeSessionId,

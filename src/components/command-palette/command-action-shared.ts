@@ -1,3 +1,4 @@
+import { sessionDisplayTitle } from "@/lib/session-helpers";
 import { resolveAdjacentOpenSessionTarget } from "@/lib/session-navigation";
 import { getProvider } from "@/providers/registry";
 import type { Repository } from "@/stores/repo-store";
@@ -72,7 +73,7 @@ export function buildSessionPreview(
       : [];
 
   return {
-    title: session.title || "Untitled Session",
+    title: sessionDisplayTitle(session),
     summary: session.prompt || "Open this session and continue working.",
     sections: [
       { label: "Workspace", value: repo?.name ?? session.repoName },
@@ -226,9 +227,9 @@ export function buildOpenSessionCyclePreview(
 
   return {
     title,
-    summary: `Switch to ${session.title || "Untitled Session"}.`,
+    summary: `Switch to ${sessionDisplayTitle(session)}.`,
     sections: [
-      { label: "Target", value: session.title || "Untitled Session" },
+      { label: "Target", value: sessionDisplayTitle(session) },
       { label: "Workspace", value: repo?.name ?? session.repoName },
       { label: "Provider", value: providerName(session.provider, ctx) },
       { label: "Status", value: formatStatus(session.status) },

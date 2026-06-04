@@ -4,14 +4,20 @@ import type { SessionStatus } from "@/types/session";
 interface StatusDotConfig {
   label: string;
   dotClass: string;
+  /** Motion for the dot; only running (heartbeat) and needsAttention (glow ping) move. */
+  animationClass: string | null;
 }
 
 const STATUS_DOT_CONFIG: Record<SessionStatus, StatusDotConfig> = {
-  running: { label: "Running", dotClass: "bg-primary" },
-  idle: { label: "Idle", dotClass: "bg-muted-foreground/60" },
-  needsAttention: { label: "Needs Attention", dotClass: "bg-warning" },
-  closed: { label: "Closed", dotClass: "bg-success" },
-  archived: { label: "Archived", dotClass: "bg-muted-foreground/60" },
+  running: { label: "Running", dotClass: "bg-primary", animationClass: "animate-pulse-dot" },
+  idle: { label: "Idle", dotClass: "bg-muted-foreground/60", animationClass: null },
+  needsAttention: {
+    label: "Needs Attention",
+    dotClass: "bg-warning",
+    animationClass: "animate-attention-glow",
+  },
+  closed: { label: "Closed", dotClass: "bg-success", animationClass: null },
+  archived: { label: "Archived", dotClass: "bg-muted-foreground/60", animationClass: null },
 };
 
 /**
@@ -22,6 +28,17 @@ const STATUS_DOT_CONFIG: Record<SessionStatus, StatusDotConfig> = {
  */
 export function statusDotClass(status: SessionStatus): string {
   return STATUS_DOT_CONFIG[status].dotClass;
+}
+
+/**
+ * Canonical status → dot motion mapping, shared by the sidebar rows, split
+ * panes, session header, and dashboard cards so a given status moves the
+ * same way everywhere: running gets the gentle pulse-dot heartbeat,
+ * needsAttention gets the louder outward attention-glow ping (the one
+ * signal demanding action), everything else is static.
+ */
+export function statusDotAnimationClass(status: SessionStatus): string | null {
+  return STATUS_DOT_CONFIG[status].animationClass;
 }
 
 interface StatusDotProps {

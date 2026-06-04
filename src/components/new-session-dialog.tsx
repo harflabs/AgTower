@@ -16,16 +16,12 @@ import {
 import { PreferenceSelect } from "@/components/ui/preference-select";
 import { useRepo } from "@/hooks/use-repo";
 import { useSession } from "@/hooks/use-session";
+import { shortenPath } from "@/lib/paths";
 import { cn } from "@/lib/utils";
 import { getProvider, useAvailableProviders } from "@/providers/registry";
 import { useModalStore } from "@/stores/modal-store";
 import { type Repository, useRepoStore } from "@/stores/repo-store";
 import { useSettingsStore } from "@/stores/settings-store";
-
-function shortenPath(p: string): string {
-  const match = p.match(/^\/Users\/[^/]+\/(.+)$/) ?? p.match(/^\/home\/[^/]+\/(.+)$/);
-  return match ? `~/${match[1]}` : p;
-}
 
 function getWorkspaceOptionId(repoId: string) {
   return `new-session-workspace-${repoId.replace(/[^a-zA-Z0-9_-]/g, "-")}`;

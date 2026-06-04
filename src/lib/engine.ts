@@ -84,7 +84,7 @@ export function getEngineSettings(): Promise<EngineSettings> {
 export function getSidebarTree(
   query: string,
   providerFilter: string | null,
-  recentClosedLimit = 5,
+  recentClosedLimit = 0,
   includeHistoryMatches = true,
 ): Promise<SidebarTree> {
   return invoke("get_sidebar_tree", {

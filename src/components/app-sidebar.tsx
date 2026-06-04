@@ -6,6 +6,7 @@ import {
   type DragOverEvent,
   DragOverlay,
   type DragStartEvent,
+  MeasuringStrategy,
   PointerSensor,
   pointerWithin,
   useDroppable,
@@ -64,7 +65,13 @@ import {
   type NativeMenuItemSpec,
   showNativeMenuForElement,
 } from "@/lib/native-menu";
+import { shortenPath, workspacePathHint } from "@/lib/paths";
 import { IS_MACOS } from "@/lib/platform";
+import {
+  buildFocusableNodes,
+  isWorkspaceExpanded,
+  workspaceDefaultExpanded,
+} from "@/lib/sidebar-visibility";
 import { StatusDot } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
 import { getProvider, useAvailableProviders } from "@/providers/registry";
@@ -81,83 +88,27 @@ import { useSidebarStore } from "@/stores/sidebar-store";
 import { useSplitViewStore } from "@/stores/split-view-store";
 import type { SidebarTree, SidebarWorkspaceNode } from "@/types/sidebar";
 
-/** Shorten an absolute path for display: replace $HOME with ~ */
-function shortenPath(p: string): string {
-  const match = p.match(/^\/Users\/[^/]+\/(.+)$/) ?? p.match(/^\/home\/[^/]+\/(.+)$/);
-  return match ? `~/${match[1]}` : p;
-}
+// One-shot guard for the per-launch collapse-override sweep below. Module
+// scope (not a ref) so a remount — StrictMode, route churn — can't re-run it
+// and collapse a workspace the user expanded during this run.
+let collapseOverridesReconciled = false;
 
-type FocusableNode =
-  | { id: `workspace:${string}`; kind: "workspace"; workspaceKey: string }
-  | { id: `history:${string}`; kind: "history"; workspaceKey: string }
-  | {
-      id: `session:${string}`;
-      kind: "session";
-      workspaceKey: string;
-      sessionId: string;
-      bucket: "attention" | "active" | "recentClosed" | "history";
-    };
+// Sorting strategy that suppresses dnd-kit's item displacement entirely.
+// This tree uses the Apple Mail idiom: rows stay in their slots (the source
+// ghosts to 40%), and the single DropIndicator line is the only "drop lands
+// here" cue — the default rectSortingStrategy would slide sibling rows
+// around to open a gap, fighting that design.
+const noSortTransforms = () => null;
 
-function buildFocusableNodes(
-  tree: SidebarTree,
-  collapsedWorkspaces: Record<string, boolean>,
-  expandedHistoryByWorkspace: Record<string, boolean>,
-) {
-  const nodes: FocusableNode[] = [];
-  const allWorkspaces = [...tree.pinnedWorkspaces, ...tree.workspaces];
-
-  for (const workspace of allWorkspaces) {
-    nodes.push({
-      id: `workspace:${workspace.key}`,
-      kind: "workspace",
-      workspaceKey: workspace.key,
-    });
-
-    const expanded = !(collapsedWorkspaces[workspace.key] ?? true);
-    if (!expanded) continue;
-
-    for (const sessionNode of workspace.visibleSessions) {
-      nodes.push({
-        id: `session:${sessionNode.id}`,
-        kind: "session",
-        workspaceKey: workspace.key,
-        sessionId: sessionNode.id,
-        bucket: sessionNode.bucket,
-      });
-    }
-
-    if (workspace.historyCount > 0) {
-      const historyExpanded = expandedHistoryByWorkspace[workspace.key] ?? false;
-
-      if (historyExpanded) {
-        for (const group of workspace.historyGroups) {
-          for (const sessionNode of group.sessions) {
-            nodes.push({
-              id: `session:${sessionNode.id}`,
-              kind: "session",
-              workspaceKey: workspace.key,
-              sessionId: sessionNode.id,
-              bucket: sessionNode.bucket,
-            });
-          }
-        }
-      }
-
-      nodes.push({
-        id: `history:${workspace.key}`,
-        kind: "history",
-        workspaceKey: workspace.key,
-      });
-    }
-  }
-
-  return nodes;
-}
+// FocusableNode/buildFocusableNodes live in lib/sidebar-visibility.ts so the
+// render-vs-keyboard agreement is testable; isWorkspaceExpanded there is the
+// single expansion resolver every read site must go through.
 
 function WorkspaceTreeGroup({
   workspace,
   expanded,
   historyExpanded,
+  pathAlwaysVisible,
   focusedNodeId,
   focusMode,
   searchActive,
@@ -173,6 +124,8 @@ function WorkspaceTreeGroup({
   workspace: SidebarWorkspaceNode;
   expanded: boolean;
   historyExpanded: boolean;
+  /** Keep the path hint permanently visible (ambiguous duplicate name). */
+  pathAlwaysVisible: boolean;
   focusedNodeId: string | null;
   focusMode: boolean;
   searchActive: boolean;
@@ -221,7 +174,11 @@ function WorkspaceTreeGroup({
   // The shared insertion line at the tree level is what tells them where
   // the drop will land.
   const style = {
-    transform: CSS.Transform.toString(transform),
+    // Translate only — never the scale component. dnd-kit morphs the active
+    // item toward the over-target's size, and with collapsed (1-line) and
+    // expanded (multi-line) workspaces coexisting that renders the source row
+    // as a giant stretched ghost. This list keeps rows in their slots.
+    transform: CSS.Translate.toString(transform),
     transition,
     opacity: isDragging ? 0.4 : 1,
   };
@@ -340,15 +297,43 @@ function WorkspaceTreeGroup({
               )}
               {collapsedStatus && (
                 <span className="absolute -bottom-0.5 -right-0.5">
-                  <StatusDot status={collapsedStatus} className="size-2" />
+                  {/* Roll-up badge: attention pings even through a collapsed
+                      folder; running stays a static dot so a wall of quiet
+                      collapsed workspaces doesn't shimmer. */}
+                  <StatusDot
+                    status={collapsedStatus}
+                    className={cn(
+                      "size-2",
+                      collapsedStatus === "needsAttention" &&
+                        "ring-1 ring-warning/40 animate-attention-glow",
+                    )}
+                  />
                 </span>
               )}
             </span>
             <span
-              className="min-w-0 flex-1 truncate text-[13px] font-medium leading-[1.05rem]"
+              className="flex min-w-0 flex-1 items-baseline leading-[1.05rem]"
               title={workspace.path ? shortenPath(workspace.path) : undefined}
             >
-              {workspace.name}
+              {/* Semibold (not medium) so the container level visibly outranks
+                  session rows on vibrancy; the dimmed path answers "where is
+                  this folder?" and truncates first, name always stays whole.
+                  Hover-revealed to keep resting headers clean — except for
+                  duplicate names, where the path is the only differentiator. */}
+              <span className="shrink-0 truncate text-[13px] font-semibold tracking-[0.01em]">
+                {workspace.name}
+              </span>
+              {workspace.path && (
+                <span
+                  className={cn(
+                    "ml-1.5 min-w-0 truncate text-[11px] font-normal text-sidebar-foreground/45 transition-opacity duration-100",
+                    !pathAlwaysVisible &&
+                      "opacity-0 group-hover/workspace:opacity-100 group-focus-within/workspace:opacity-100",
+                  )}
+                >
+                  {workspacePathHint(workspace.path)}
+                </span>
+              )}
             </span>
           </button>
           <div
@@ -462,9 +447,11 @@ function WorkspaceTreeGroup({
               workspace.historyGroups.map((group) => (
                 <Fragment key={group.label}>
                   <li role="none" className="pt-1.5">
+                    {/* Sentence-case and dim: a third-level label must not
+                        compete with the top-level PINNED/WORKSPACES caps. */}
                     <button
                       type="button"
-                      className="block w-full pl-8 text-left text-[11px] font-semibold uppercase tracking-[0.06em] text-sidebar-foreground/88 hover:text-sidebar-foreground"
+                      className="block w-full pl-7 text-left text-[11px] font-medium text-sidebar-foreground/45 hover:text-sidebar-foreground"
                       onClick={() => onToggleHistory(workspace.key)}
                     >
                       {group.label}
@@ -494,7 +481,10 @@ function WorkspaceTreeGroup({
                   aria-expanded={historyExpanded}
                   tabIndex={historyFocused ? 0 : -1}
                   className={cn(
-                    "flex h-7 min-h-7 w-full min-w-0 items-center rounded-md border border-transparent py-0 pl-8 pr-2 text-left text-[11px] font-medium text-sidebar-foreground/88 outline-none transition-[background-color,border-color,color] duration-100 hover:bg-sidebar-interactive-hover hover:text-sidebar-foreground focus-visible:bg-sidebar-interactive-hover focus-visible:text-sidebar-foreground",
+                    // Quiet disclosure: text-only affordance, no hover fill —
+                    // it's plumbing, not content, and must not outrank the
+                    // dimmed history rows around it.
+                    "flex h-6 min-h-6 w-full min-w-0 items-center rounded-md border border-transparent py-0 pl-7 pr-2 text-left text-[11px] font-medium text-sidebar-foreground/55 outline-none transition-[color,background-color] duration-100 hover:text-sidebar-foreground focus-visible:bg-sidebar-interactive-hover focus-visible:text-sidebar-foreground",
                     historyFocused &&
                       "border-transparent bg-sidebar-interactive-hover text-sidebar-foreground",
                     searchActive && "cursor-default",
@@ -734,14 +724,18 @@ const WORKSPACES_DROPZONE_ID = "__workspaces_dropzone__";
  * - Session rows use our custom `session-drag-drop` CustomEvent (bounding-box
  *   hit-test on mouseup — dnd-kit never sees those drags).
  *
- * `hasContent` controls the visual: an explicit dashed card when the section
- * is empty, or a thin highlight when the cursor hovers over an active section.
+ * `hasContent` controls the visual: when the section is empty the host is
+ * invisible at rest and becomes a dashed drop card only while `dragActive`;
+ * when populated it wraps the content with a thin highlight on hover.
  */
 function PinnedSectionDropZone({
   hasContent,
+  dragActive,
   children,
 }: {
   hasContent: boolean;
+  /** A workspace or session drag is in flight — reveal the empty drop target. */
+  dragActive: boolean;
   children?: React.ReactNode;
 }) {
   const { setNodeRef, isOver } = useDroppable({ id: PINNED_DROPZONE_ID });
@@ -815,8 +809,11 @@ function PinnedSectionDropZone({
 
   const highlight = isOver || sessionHover;
 
-  // Empty pinned section: keep an explicit drop target visible so users can
-  // discover pinning without needing to start a drag first.
+  // Empty pinned section: invisible at rest (no permanent placeholder chrome),
+  // revealed as a dashed drop target only while a drag is in flight. The host
+  // stays mounted in both states — dnd-kit's droppable rect and the custom
+  // session drag's mousemove hit-test both need a live DOM node (same
+  // always-mounted pattern as UnpinDropPill below).
   if (!hasContent) {
     return (
       <div
@@ -824,11 +821,21 @@ function PinnedSectionDropZone({
           setNodeRef(node);
           hostRef.current = node;
         }}
+        aria-hidden={!dragActive}
         className={cn(
-          "mx-3 mb-1 flex min-h-7 items-center rounded-md border border-dashed px-2.5 py-1 text-[11px] leading-tight transition-[background-color,border-color,color] duration-100",
-          highlight
-            ? "border-sidebar-border/70 bg-sidebar-interactive-hover text-sidebar-foreground"
-            : "border-sidebar-border/60 bg-transparent text-sidebar-foreground/84",
+          // Height switches INSTANTLY (only opacity/color fade): the custom
+          // session drag hit-tests this host's live bounding rect and dnd-kit
+          // measures droppables right after the drag starts — an animated
+          // max-height would expose a near-zero rect during the transition
+          // and drops in that window would silently miss.
+          "mx-3 flex items-center overflow-hidden rounded-md border px-2.5 text-[11px] leading-tight transition-[border-color,background-color,color,opacity] duration-150",
+          dragActive
+            ? "mb-1 max-h-7 border-dashed py-1 opacity-100"
+            : "mb-0 max-h-0 border-transparent py-0 opacity-0",
+          dragActive &&
+            (highlight
+              ? "border-sidebar-border/70 bg-sidebar-interactive-hover text-sidebar-foreground"
+              : "border-sidebar-border/60 bg-transparent text-sidebar-foreground/84"),
         )}
       >
         Drag a workspace or session here to pin it.
@@ -1101,6 +1108,9 @@ export default function AppSidebar() {
   const [loading, setLoading] = useState(true);
   const [removeTarget, setRemoveTarget] = useState<SidebarWorkspaceNode | null>(null);
   const [activeDragId, setActiveDragId] = useState<string | null>(null);
+  // Custom session drag (sidebar rows bypass dnd-kit) — needed alongside
+  // activeDragId so the empty Pinned drop target reveals for both systems.
+  const draggingSessionId = useSplitViewStore((s) => s.draggingSessionId);
   // Position + visibility of the shared insertion indicator. `top` is in
   // tree-local pixels (relative to treeRef). We always update `top` even
   // when invisible, so when the indicator becomes visible it shows up at
@@ -1202,6 +1212,28 @@ export default function AppSidebar() {
     };
   }, [sortedTree, pinnedSessionIds]);
 
+  // Lookup for the expansion resolver. Built from displayTree — the same
+  // node set the render and buildFocusableNodes consume — so keyboard
+  // handlers can never disagree with what is on screen.
+  const workspacesByKey = useMemo(() => {
+    const map = new Map<string, SidebarWorkspaceNode>();
+    for (const workspace of [...displayTree.pinnedWorkspaces, ...displayTree.workspaces]) {
+      map.set(workspace.key, workspace);
+    }
+    return map;
+  }, [displayTree]);
+
+  // Workspace names that appear more than once. Their headers keep the path
+  // hint always visible (it's the only way to tell them apart); unique names
+  // reveal the path on hover only.
+  const duplicateWorkspaceNames = useMemo(() => {
+    const counts = new Map<string, number>();
+    for (const workspace of workspacesByKey.values()) {
+      counts.set(workspace.name, (counts.get(workspace.name) ?? 0) + 1);
+    }
+    return new Set([...counts.entries()].filter(([, n]) => n > 1).map(([name]) => name));
+  }, [workspacesByKey]);
+
   const pinnedSessionEntries = useMemo(() => {
     if (Object.keys(pinnedSessionIds).length === 0) return [] as FlatSessionEntry[];
     // Take every pinned id that still resolves to a known session and emit
@@ -1245,13 +1277,19 @@ export default function AppSidebar() {
           }) as const,
       );
     }
-    return buildFocusableNodes(displayTree, collapsedWorkspaces, expandedHistoryByWorkspace);
+    return buildFocusableNodes(
+      displayTree,
+      collapsedWorkspaces,
+      expandedHistoryByWorkspace,
+      sessions,
+    );
   }, [
     searchActive,
     flatSearchResults,
     displayTree,
     collapsedWorkspaces,
     expandedHistoryByWorkspace,
+    sessions,
   ]);
 
   const focusableNodeIds = useMemo(() => visibleNodes.map((node) => node.id), [visibleNodes]);
@@ -1269,7 +1307,9 @@ export default function AppSidebar() {
 
   const fetchTree = useCallback(async () => {
     try {
-      const nextTree = await getSidebarTree(debouncedQuery, sidebarProviderFilter || null, 5, true);
+      // Live sessions only; every closed session lives behind the quiet
+      // "Show more (N)" disclosure.
+      const nextTree = await getSidebarTree(debouncedQuery, sidebarProviderFilter || null, 0, true);
       setTree(nextTree);
     } catch (error) {
       console.error("[sidebar] Failed to load tree:", error);
@@ -1307,11 +1347,49 @@ export default function AppSidebar() {
     const activeSession = activeSessionId ? sessions[activeSessionId] : null;
     if (!activeSession) return;
 
+    // A removed repo's sessions render under the `missing:{repoId}` key —
+    // resolve through the tree so the expand lands on the rendered node.
+    const workspace =
+      workspacesByKey.get(activeSession.repoId) ??
+      workspacesByKey.get(`missing:${activeSession.repoId}`);
+    const workspaceKey = workspace?.key ?? activeSession.repoId;
+
     const sidebar = useSidebarStore.getState();
-    if (sidebar.collapsedWorkspaces[activeSession.repoId] ?? true) {
-      sidebar.setWorkspaceCollapsed(activeSession.repoId, false);
+    if (sidebar.collapsedWorkspaces[workspaceKey] ?? true) {
+      sidebar.setWorkspaceCollapsed(workspaceKey, false);
     }
-  }, [activeSessionId, sessions]);
+  }, [activeSessionId, sessions, workspacesByKey]);
+
+  // Once per launch: quiet repos start collapsed. Persisted "expanded"
+  // overrides accumulate over time (opening any session pins its workspace
+  // expanded), so without this sweep the status-derived default would never
+  // apply. Explicit collapses are kept; the active session's workspace is
+  // skipped (the effect above just expanded it on purpose).
+  const sessionsHydrated = useSessionStore((s) => s._hydrated);
+  useEffect(() => {
+    if (collapseOverridesReconciled || loading || !sessionsHydrated) return;
+    collapseOverridesReconciled = true;
+
+    // Read sessions from the store, not the render closure: hydration can
+    // land between this render's commit and its effects, and a stale-empty
+    // snapshot here would prune every override (the one-shot flag would then
+    // block a corrective pass).
+    const storeSessions = useSessionStore.getState().sessions;
+    const activeRepoId = activeSessionId ? storeSessions[activeSessionId]?.repoId : null;
+    const staleKeys: string[] = [];
+    for (const workspace of [...tree.pinnedWorkspaces, ...tree.workspaces]) {
+      // Skip the active session's workspace — rendered as either the repo
+      // key or, for removed repos, the `missing:`-prefixed key.
+      if (workspace.key === activeRepoId || workspace.key === `missing:${activeRepoId}`) continue;
+      if (useSidebarStore.getState().collapsedWorkspaces[workspace.key] !== false) continue;
+      if (!workspaceDefaultExpanded(workspace, storeSessions)) {
+        staleKeys.push(workspace.key);
+      }
+    }
+    if (staleKeys.length > 0) {
+      useSidebarStore.getState().clearWorkspaceCollapseOverrides(staleKeys);
+    }
+  }, [loading, tree, activeSessionId, sessionsHydrated]);
 
   const prevFocusableNodeIdsRef = useRef<string[]>(focusableNodeIds);
   useEffect(() => {
@@ -1397,9 +1475,36 @@ export default function AppSidebar() {
     [setSidebarFocusMode],
   );
 
-  const handleToggleWorkspace = useCallback((workspaceKey: string) => {
-    useSidebarStore.getState().toggleWorkspaceCollapsed(workspaceKey);
-  }, []);
+  // Resolve the workspace's *effective* expanded state (explicit toggle or
+  // status-derived default). Toggling must flip from what the user sees, not
+  // from the raw store entry — an auto-expanded workspace has no entry, and
+  // a store-side `?? true` toggle would "re-expand" it on first click.
+  const resolveWorkspaceExpanded = useCallback(
+    (workspaceKey: string) => {
+      const workspace = workspacesByKey.get(workspaceKey);
+      const state = useSidebarStore.getState();
+      if (!workspace) return !(state.collapsedWorkspaces[workspaceKey] ?? true);
+      return isWorkspaceExpanded(
+        workspace,
+        state.collapsedWorkspaces,
+        useSessionStore.getState().sessions,
+      );
+    },
+    [workspacesByKey],
+  );
+
+  const handleToggleWorkspace = useCallback(
+    (workspaceKey: string) => {
+      const state = useSidebarStore.getState();
+      const expanded = resolveWorkspaceExpanded(workspaceKey);
+      state.setWorkspaceCollapsed(workspaceKey, expanded);
+      // Reset history when collapsing (mirrors the old store-side toggle).
+      if (expanded && state.expandedHistoryByWorkspace[workspaceKey]) {
+        state.toggleWorkspaceHistory(workspaceKey);
+      }
+    },
+    [resolveWorkspaceExpanded],
+  );
 
   const handleToggleHistory = useCallback((workspaceKey: string) => {
     useSidebarStore.getState().toggleWorkspaceHistory(workspaceKey);
@@ -1408,16 +1513,19 @@ export default function AppSidebar() {
   // Option+click / recursive expand: bring the workspace and its history
   // into the same state. If either is collapsed, expand both; otherwise
   // collapse both. Matches NSOutlineView's Option-click expand-all.
-  const handleToggleAllForWorkspace = useCallback((workspaceKey: string) => {
-    const state = useSidebarStore.getState();
-    const isCollapsed = state.collapsedWorkspaces[workspaceKey] ?? true;
-    const historyExpanded = state.expandedHistoryByWorkspace[workspaceKey] ?? false;
-    const shouldExpand = isCollapsed || !historyExpanded;
-    state.setWorkspaceCollapsed(workspaceKey, !shouldExpand);
-    if (historyExpanded !== shouldExpand) {
-      state.toggleWorkspaceHistory(workspaceKey);
-    }
-  }, []);
+  const handleToggleAllForWorkspace = useCallback(
+    (workspaceKey: string) => {
+      const state = useSidebarStore.getState();
+      const expanded = resolveWorkspaceExpanded(workspaceKey);
+      const historyExpanded = state.expandedHistoryByWorkspace[workspaceKey] ?? false;
+      const shouldExpand = !expanded || !historyExpanded;
+      state.setWorkspaceCollapsed(workspaceKey, !shouldExpand);
+      if (historyExpanded !== shouldExpand) {
+        state.toggleWorkspaceHistory(workspaceKey);
+      }
+    },
+    [resolveWorkspaceExpanded],
+  );
 
   const handleOpenSession = useCallback(
     (sessionId: string) => {
@@ -1778,8 +1886,10 @@ export default function AppSidebar() {
         }
 
         if (activeNode.kind === "workspace") {
-          const isExpanded = !(collapsedWorkspaces[activeNode.workspaceKey] ?? true);
-          if (isExpanded) {
+          // Must use the shared resolver: an auto-expanded workspace has no
+          // collapsedWorkspaces entry, and a raw `?? true` read here would
+          // treat it as collapsed while it renders expanded.
+          if (resolveWorkspaceExpanded(activeNode.workspaceKey)) {
             handleToggleWorkspace(activeNode.workspaceKey);
           }
         }
@@ -1791,7 +1901,7 @@ export default function AppSidebar() {
         if (activeNode.kind === "workspace") {
           const nextIndex = focusableNodeIds.indexOf(activeNode.id) + 1;
           const nextId = focusableNodeIds[nextIndex];
-          if (collapsedWorkspaces[activeNode.workspaceKey] ?? true) {
+          if (!resolveWorkspaceExpanded(activeNode.workspaceKey)) {
             handleToggleWorkspace(activeNode.workspaceKey);
           } else if (nextId) {
             setFocusedNodeId(nextId);
@@ -1811,7 +1921,7 @@ export default function AppSidebar() {
     },
     [
       allWorkspaces,
-      collapsedWorkspaces,
+      resolveWorkspaceExpanded,
       expandedHistoryByWorkspace,
       focusableNodeIds,
       focusedNodeId,
@@ -1958,6 +2068,10 @@ export default function AppSidebar() {
               <DndContext
                 sensors={sensors}
                 collisionDetection={collisionDetection}
+                // Drop targets change size mid-drag (the empty Pinned pill
+                // expands when a drag starts) — re-measure continuously so
+                // collision detection never works from stale drag-start rects.
+                measuring={{ droppable: { strategy: MeasuringStrategy.Always } }}
                 onDragStart={handleDragStart}
                 onDragOver={handleDragOver}
                 onDragCancel={handleDragCancel}
@@ -1966,18 +2080,26 @@ export default function AppSidebar() {
                 {(() => {
                   const pinnedEmpty =
                     displayTree.pinnedWorkspaces.length === 0 && pinnedSessionEntries.length === 0;
+                  // Either drag system in flight: @dnd-kit workspace reorder
+                  // or the custom mouse-based session drag.
+                  const dragActive = activeDragId !== null || draggingSessionId !== null;
                   return (
                     <>
-                      <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-1">
-                        <span
-                          data-sidebar-section-label
-                          className="text-[11px] font-semibold uppercase tracking-[0.08em]"
-                        >
-                          Pinned
-                        </span>
-                      </div>
+                      {/* No permanent chrome for an empty Pinned section — the
+                          label and drop pill appear only when there is content
+                          or a drag that could create some. */}
+                      {(!pinnedEmpty || dragActive) && (
+                        <div className="flex items-center gap-1.5 px-3.5 pb-1 pt-1">
+                          <span
+                            data-sidebar-section-label
+                            className="text-[11px] font-semibold uppercase tracking-[0.08em]"
+                          >
+                            Pinned
+                          </span>
+                        </div>
+                      )}
 
-                      <PinnedSectionDropZone hasContent={!pinnedEmpty}>
+                      <PinnedSectionDropZone hasContent={!pinnedEmpty} dragActive={dragActive}>
                         {/*
                          * Order within the pinned section:
                          *   1. Standalone pinned sessions (flat rows).
@@ -2020,9 +2142,13 @@ export default function AppSidebar() {
                             />
                           )}
 
-                        <SortableContext items={pinnedSortItems}>
+                        <SortableContext items={pinnedSortItems} strategy={noSortTransforms}>
                           {displayTree.pinnedWorkspaces.map((workspace) => {
-                            const wsExpanded = !(collapsedWorkspaces[workspace.key] ?? true);
+                            const wsExpanded = isWorkspaceExpanded(
+                              workspace,
+                              collapsedWorkspaces,
+                              sessions,
+                            );
                             const histExpanded = expandedHistoryByWorkspace[workspace.key] ?? false;
 
                             return (
@@ -2031,6 +2157,7 @@ export default function AppSidebar() {
                                 workspace={workspace}
                                 expanded={wsExpanded}
                                 historyExpanded={histExpanded}
+                                pathAlwaysVisible={duplicateWorkspaceNames.has(workspace.name)}
                                 focusedNodeId={focusedNodeId}
                                 focusMode={sidebarFocusMode}
                                 searchActive={false}
@@ -2089,9 +2216,13 @@ export default function AppSidebar() {
                   visible={activeDragId !== null && pinnedSortItems.includes(activeDragId)}
                 />
 
-                <SortableContext items={workspaceSortItems}>
+                <SortableContext items={workspaceSortItems} strategy={noSortTransforms}>
                   {displayTree.workspaces.map((workspace) => {
-                    const wsExpanded = !(collapsedWorkspaces[workspace.key] ?? true);
+                    const wsExpanded = isWorkspaceExpanded(
+                      workspace,
+                      collapsedWorkspaces,
+                      sessions,
+                    );
                     const histExpanded = expandedHistoryByWorkspace[workspace.key] ?? false;
 
                     return (
@@ -2100,6 +2231,7 @@ export default function AppSidebar() {
                         workspace={workspace}
                         expanded={wsExpanded}
                         historyExpanded={histExpanded}
+                        pathAlwaysVisible={duplicateWorkspaceNames.has(workspace.name)}
                         focusedNodeId={focusedNodeId}
                         focusMode={sidebarFocusMode}
                         searchActive={false}

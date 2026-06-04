@@ -233,69 +233,7 @@ pub(crate) fn compute_sidebar_tree(
 
         let history_count = history_pool.len();
         let history_groups = if history_count > 0 && (include_history_matches || !has_query) {
-            let now = epoch_ms();
-            let today = today_start_ms(now);
-            let yesterday = today - 86_400_000;
-            let last7 = today - 7 * 86_400_000;
-            let last30 = today - 30 * 86_400_000;
-
-            let mut g_today = Vec::new();
-            let mut g_yesterday = Vec::new();
-            let mut g_last7 = Vec::new();
-            let mut g_last30 = Vec::new();
-            let mut g_older = Vec::new();
-
-            for session in &history_pool {
-                let t = session.ended_at.unwrap_or(session.created_at);
-                let node = SidebarSessionNode {
-                    id: session.id.clone(),
-                    bucket: SidebarSessionBucket::History,
-                };
-                if t >= today {
-                    g_today.push(node);
-                } else if t >= yesterday {
-                    g_yesterday.push(node);
-                } else if t >= last7 {
-                    g_last7.push(node);
-                } else if t >= last30 {
-                    g_last30.push(node);
-                } else {
-                    g_older.push(node);
-                }
-            }
-
-            let mut groups = Vec::new();
-            if !g_today.is_empty() {
-                groups.push(SidebarHistoryGroup {
-                    label: "Today".to_string(),
-                    sessions: g_today,
-                });
-            }
-            if !g_yesterday.is_empty() {
-                groups.push(SidebarHistoryGroup {
-                    label: "Yesterday".to_string(),
-                    sessions: g_yesterday,
-                });
-            }
-            if !g_last7.is_empty() {
-                groups.push(SidebarHistoryGroup {
-                    label: "Last 7 days".to_string(),
-                    sessions: g_last7,
-                });
-            }
-            if !g_last30.is_empty() {
-                groups.push(SidebarHistoryGroup {
-                    label: "Last 30 days".to_string(),
-                    sessions: g_last30,
-                });
-            }
-            if !g_older.is_empty() {
-                groups.push(SidebarHistoryGroup {
-                    label: "Older".to_string(),
-                    sessions: g_older,
-                });
-            }
-            groups
+            build_history_groups(&history_pool)
         } else {
             Vec::new()
         };
@@ -366,6 +304,11 @@ pub(crate) fn compute_sidebar_tree(
             .first()
             .map(|session| session.repo_name.clone())
             .unwrap_or_else(|| "Removed Workspace".to_string());
+        // Missing workspaces are exactly the ones whose location is most
+        // ambiguous — surface the path their sessions still remember.
+        let workspace_path = group_sessions
+            .first()
+            .map(|session| session.repo_path.clone());
         let workspace_matches_search = !has_query
             || matches_search(
                 query,
@@ -383,40 +326,95 @@ pub(crate) fn compute_sidebar_tree(
             continue;
         }
 
-        let visible_sessions = group_sessions
+        let matches_filter = |session: &Session| -> bool {
+            !has_query
+                || workspace_matches_search
+                || matches_search(
+                    query,
+                    &[&session.title, &session.prompt, &session.repo_name],
+                )
+        };
+
+        // Mirror the normal-workspace path: live sessions stay visible, closed
+        // ones honor the recent cap and overflow into the "Show more" history
+        // groups — a removed repo shouldn't dump its whole backlog inline.
+        let mut active_sessions: Vec<Session> = group_sessions
+            .iter()
+            .filter(|session| session.status.is_active())
+            .cloned()
+            .collect();
+        active_sessions.sort_by(sort_active_sessions);
+
+        let mut closed_sessions: Vec<Session> = group_sessions
+            .iter()
+            .filter(|session| session.status == SessionStatus::Closed)
+            .cloned()
+            .collect();
+        closed_sessions.sort_by(sort_terminal_sessions);
+
+        let visible_recent_closed: Vec<Session> = if has_query {
+            closed_sessions
+                .iter()
+                .filter(|session| matches_filter(session))
+                .cloned()
+                .collect()
+        } else {
+            closed_sessions
+                .iter()
+                .take(recent_closed_limit)
+                .cloned()
+                .collect()
+        };
+
+        let recent_closed_ids: HashSet<String> = visible_recent_closed
+            .iter()
+            .map(|session| session.id.clone())
+            .collect();
+
+        let history_pool: Vec<Session> = closed_sessions
             .into_iter()
-            .filter(|session| {
-                !has_query
-                    || workspace_matches_search
-                    || matches_search(
-                        query,
-                        &[&session.title, &session.prompt, &session.repo_name],
-                    )
-            })
+            .filter(|session| !recent_closed_ids.contains(&session.id))
+            .filter(|session| matches_filter(session))
+            .collect();
+
+        let history_count = history_pool.len();
+        let history_groups = if history_count > 0 && (include_history_matches || !has_query) {
+            build_history_groups(&history_pool)
+        } else {
+            Vec::new()
+        };
+
+        let visible_sessions = active_sessions
+            .into_iter()
+            .filter(|session| matches_filter(session))
             .map(|session| SidebarSessionNode {
                 id: session.id,
                 bucket: if session.status == SessionStatus::NeedsAttention {
                     SidebarSessionBucket::Attention
-                } else if session.status.is_active() {
-                    SidebarSessionBucket::Active
-                } else if session.status == SessionStatus::Closed {
-                    SidebarSessionBucket::RecentClosed
                 } else {
-                    SidebarSessionBucket::History
+                    SidebarSessionBucket::Active
                 },
             })
+            .chain(
+                visible_recent_closed
+                    .into_iter()
+                    .map(|session| SidebarSessionNode {
+                        id: session.id,
+                        bucket: SidebarSessionBucket::RecentClosed,
+                    }),
+            )
             .collect::<Vec<_>>();
 
         workspaces.push(SidebarWorkspaceNode {
             key: format!("missing:{repo_id}"),
             repo_id: Some(repo_id),
             name: workspace_name,
-            path: None,
+            path: workspace_path,
             color: None,
             is_missing: true,
             visible_sessions,
-            history_count: 0,
-            history_groups: Vec::new(),
+            history_count,
+            history_groups,
         });
     }
 
@@ -438,6 +436,76 @@ pub(crate) fn compute_sidebar_tree(
 // ---------------------------------------------------------------------------
 
 use super::epoch_ms;
+
+/// Bucket a recency-sorted history pool into the sidebar's "Show more" time
+/// groups (Today / Yesterday / Last 7 days / Last 30 days / Older). Shared by
+/// the normal-workspace and missing-workspace paths so both disclose closed
+/// sessions the same way.
+fn build_history_groups(history_pool: &[Session]) -> Vec<SidebarHistoryGroup> {
+    let now = epoch_ms();
+    let today = today_start_ms(now);
+    let yesterday = today - 86_400_000;
+    let last7 = today - 7 * 86_400_000;
+    let last30 = today - 30 * 86_400_000;
+
+    let mut g_today = Vec::new();
+    let mut g_yesterday = Vec::new();
+    let mut g_last7 = Vec::new();
+    let mut g_last30 = Vec::new();
+    let mut g_older = Vec::new();
+
+    for session in history_pool {
+        let t = session.ended_at.unwrap_or(session.created_at);
+        let node = SidebarSessionNode {
+            id: session.id.clone(),
+            bucket: SidebarSessionBucket::History,
+        };
+        if t >= today {
+            g_today.push(node);
+        } else if t >= yesterday {
+            g_yesterday.push(node);
+        } else if t >= last7 {
+            g_last7.push(node);
+        } else if t >= last30 {
+            g_last30.push(node);
+        } else {
+            g_older.push(node);
+        }
+    }
+
+    let mut groups = Vec::new();
+    if !g_today.is_empty() {
+        groups.push(SidebarHistoryGroup {
+            label: "Today".to_string(),
+            sessions: g_today,
+        });
+    }
+    if !g_yesterday.is_empty() {
+        groups.push(SidebarHistoryGroup {
+            label: "Yesterday".to_string(),
+            sessions: g_yesterday,
+        });
+    }
+    if !g_last7.is_empty() {
+        groups.push(SidebarHistoryGroup {
+            label: "Last 7 days".to_string(),
+            sessions: g_last7,
+        });
+    }
+    if !g_last30.is_empty() {
+        groups.push(SidebarHistoryGroup {
+            label: "Last 30 days".to_string(),
+            sessions: g_last30,
+        });
+    }
+    if !g_older.is_empty() {
+        groups.push(SidebarHistoryGroup {
+            label: "Older".to_string(),
+            sessions: g_older,
+        });
+    }
+    groups
+}
 
 /// Calculate the start of today in milliseconds (midnight local time).
 /// Falls back to approximate calculation if timezone conversion fails.
@@ -659,6 +727,9 @@ mod tests {
             .find(|workspace| workspace.is_missing)
             .unwrap();
         assert_eq!(missing_workspace.name, "Removed Repo");
+        // Missing workspaces surface the path their sessions remember — the
+        // sidebar shows it so the user can still tell where the folder was.
+        assert_eq!(missing_workspace.path.as_deref(), Some("/gone/repo"));
         assert_eq!(
             missing_workspace
                 .visible_sessions
@@ -667,6 +738,86 @@ mod tests {
                 .collect::<Vec<_>>(),
             vec!["missing-closed"]
         );
+    }
+
+    #[test]
+    fn missing_workspace_honors_recent_closed_limit_and_builds_history() {
+        let repos: HashMap<String, Repository> = HashMap::new();
+
+        let mut sessions = HashMap::new();
+        let running = make_session(
+            "missing-running",
+            "missing-repo",
+            "Removed Repo",
+            "Running",
+            "prompt",
+            SessionStatus::Running,
+            900,
+        );
+        let mut closed_a = make_session(
+            "missing-closed-a",
+            "missing-repo",
+            "Removed Repo",
+            "Closed A",
+            "prompt",
+            SessionStatus::Closed,
+            500,
+        );
+        closed_a.ended_at = Some(600);
+        let mut closed_b = make_session(
+            "missing-closed-b",
+            "missing-repo",
+            "Removed Repo",
+            "Closed B",
+            "prompt",
+            SessionStatus::Closed,
+            300,
+        );
+        closed_b.ended_at = Some(400);
+        for session in [running, closed_a, closed_b] {
+            sessions.insert(session.id.clone(), session);
+        }
+
+        // Same contract as normal workspaces: with the cap at 0, only live
+        // sessions stay inline and every closed one is disclosed via history.
+        let tree = compute_sidebar_tree(&sessions, &repos, "", None, 0, false);
+        let workspace = tree
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.is_missing)
+            .unwrap();
+        assert_eq!(
+            workspace
+                .visible_sessions
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["missing-running"]
+        );
+        assert_eq!(workspace.history_count, 2);
+        let history_ids: Vec<String> = workspace
+            .history_groups
+            .iter()
+            .flat_map(|group| group.sessions.iter().map(|node| node.id.clone()))
+            .collect();
+        assert_eq!(history_ids, vec!["missing-closed-a", "missing-closed-b"]);
+
+        // And with a cap of 1 the most recent closed stays inline.
+        let tree = compute_sidebar_tree(&sessions, &repos, "", None, 1, false);
+        let workspace = tree
+            .workspaces
+            .iter()
+            .find(|workspace| workspace.is_missing)
+            .unwrap();
+        assert_eq!(
+            workspace
+                .visible_sessions
+                .iter()
+                .map(|node| node.id.clone())
+                .collect::<Vec<_>>(),
+            vec!["missing-running", "missing-closed-a"]
+        );
+        assert_eq!(workspace.history_count, 1);
     }
 
     #[test]

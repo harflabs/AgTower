@@ -9,8 +9,8 @@ import { IconButton } from "@/components/ui/icon-button";
 import { useNow } from "@/hooks/use-now";
 import { createContextMenuHandler, type NativeMenuItemSpec } from "@/lib/native-menu";
 import type { KanbanColumnKey } from "@/lib/session-helpers";
-import { formatDuration, formatModelName } from "@/lib/session-helpers";
-import { statusDotClass } from "@/lib/status-icons";
+import { formatDuration, formatModelName, sessionDisplayTitle } from "@/lib/session-helpers";
+import { statusDotAnimationClass, statusDotClass } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
 import { useRepoStore } from "@/stores/repo-store";
 import type { Session } from "@/stores/session-store";
@@ -59,6 +59,7 @@ export const SessionCard = memo(function SessionCard({
 
   const modelShort = session.model ? formatModelName(session.model) : null;
   const actions = getActions(session, onStop, onRestart);
+  const displayTitle = sessionDisplayTitle(session);
 
   const isAttention = columnKey === "attention";
   const isIdle = columnKey === "idle";
@@ -128,7 +129,7 @@ export const SessionCard = memo(function SessionCard({
       data-selection="chrome"
       role="group"
       tabIndex={0}
-      aria-label={`${session.title} session`}
+      aria-label={`${displayTitle} session`}
       onClick={handleCardClick}
       onKeyDown={handleCardKeyDown}
       onContextMenu={handleContextMenu}
@@ -143,24 +144,25 @@ export const SessionCard = memo(function SessionCard({
       >
         <div>
           <div className="mb-1.5 flex items-center gap-1.5">
-            {columnKey === "running" ? (
-              <span
-                className={cn(
-                  "size-2 shrink-0 rounded-full animate-pulse-dot",
-                  statusDotClass("running"),
-                )}
-              />
-            ) : isAttention ? (
+            {isAttention ? (
+              // Attention keeps the static triangle here: the kanban column
+              // placement already routes the eye, and a shape beats a glowing
+              // dot at card size. The sidebar's attention-glow ping covers the
+              // surfaces without a dedicated Attention region.
               <AlertTriangle
                 className={cn("size-3.5 shrink-0", isErrored ? "text-destructive" : "text-warning")}
               />
             ) : (
               <span
-                className={cn("size-2 shrink-0 rounded-full", statusDotClass(session.status))}
+                className={cn(
+                  "size-2 shrink-0 rounded-full",
+                  statusDotClass(session.status),
+                  statusDotAnimationClass(session.status),
+                )}
               />
             )}
 
-            <span className="min-w-0 flex-1 truncate text-primary-info">{session.title}</span>
+            <span className="min-w-0 flex-1 truncate text-primary-info">{displayTitle}</span>
 
             <div className="relative flex min-h-5 shrink-0 items-center justify-end">
               {duration > 0 && (

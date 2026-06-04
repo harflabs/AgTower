@@ -24,8 +24,8 @@ import {
   type NativeMenuItemSpec,
   showNativeMenuForElement,
 } from "@/lib/native-menu";
-import { formatDuration } from "@/lib/session-helpers";
-import { StatusDot } from "@/lib/status-icons";
+import { formatDuration, sessionDisplayTitle } from "@/lib/session-helpers";
+import { StatusDot, statusDotAnimationClass } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
 import { getProvider } from "@/providers/registry";
 import { useSessionStore } from "@/stores/session-store";
@@ -277,10 +277,7 @@ function SessionToolbarBody({
         >
           <StatusDot
             status={model.session.status}
-            className={cn(
-              "size-2 shrink-0",
-              model.session.status === "running" && "animate-pulse-dot",
-            )}
+            className={cn("size-2 shrink-0", statusDotAnimationClass(model.session.status))}
           />
 
           <Breadcrumb
@@ -323,7 +320,7 @@ function SessionToolbarBody({
                   )}
                   title="Click to rename"
                 >
-                  {model.session.title}
+                  {sessionDisplayTitle(model.session)}
                 </button>
               )
             }

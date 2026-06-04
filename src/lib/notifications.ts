@@ -6,7 +6,7 @@ import {
 } from "@tauri-apps/plugin-notification";
 import { toast } from "sonner";
 import { HAS_TAURI_RUNTIME, IS_MACOS } from "@/lib/platform";
-import { formatDuration } from "@/lib/session-helpers";
+import { formatDuration, sessionDisplayTitle } from "@/lib/session-helpers";
 import type { Session } from "@/stores/session-store";
 import { useSessionStore } from "@/stores/session-store";
 import { type NotificationSettings, useSettingsStore } from "@/stores/settings-store";
@@ -134,7 +134,7 @@ function deliverAttention(session: Session, settings: NotificationSettings) {
   const title = isError ? "Agent needs attention" : "Agent waiting for input";
 
   // Rich body with stats
-  const parts = [session.title];
+  const parts = [sessionDisplayTitle(session)];
   if (session.durationMs) parts.push(formatDuration(session.durationMs));
   if (session.numTurns) parts.push(`${session.numTurns} turns`);
   const body = `${session.repoName} — ${parts.join(" · ")}`;
@@ -182,7 +182,7 @@ export function notifySessionCompleted(session: Session) {
 
   const settings = useSettingsStore.getState().notifications;
   if (settings.doNotDisturb) return;
-  const title = session.title || "Session completed";
+  const title = sessionDisplayTitle(session);
   const body = `${session.repoName} — Done`;
 
   if (settings.desktop) {

@@ -8,9 +8,9 @@ import { Input } from "@/components/ui/input";
 import { interactiveStyles } from "@/components/ui/interactive-styles";
 import { SidebarMenuButton, SidebarMenuItem } from "@/components/ui/sidebar";
 import { useSessionDrag } from "@/hooks/use-session-drag";
-import { formatTimeAgo } from "@/lib/session-helpers";
+import { formatTimeAgo, sessionDisplayTitle } from "@/lib/session-helpers";
 import { getSplitPaneSide } from "@/lib/split-view";
-import { StatusDot } from "@/lib/status-icons";
+import { StatusDot, statusDotAnimationClass } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
 import { useRepoStore } from "@/stores/repo-store";
 import { useSessionStore } from "@/stores/session-store";
@@ -66,14 +66,28 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
 
     if (!session) return null;
 
-    const showStatusIndicator = session.status === "running" || session.status === "needsAttention";
+    const isRunning = session.status === "running";
+    const isAttention = session.status === "needsAttention";
+    // "Live" = the agent could still produce work: an active status or an
+    // attached PTY. Liveness — not recency — is what earns full color and
+    // brightness in the list.
+    const isLive = isRunning || isAttention || session.ptyActive;
+    const showStatusIndicator =
+      isRunning || isAttention || (session.status === "idle" && session.ptyActive);
     const timeAgo = formatTimeAgo(session.endedAt ?? session.createdAt);
     const rowFocused = isFocused && focusMode;
-    // Rows without a live PTY are slightly deemphasized, but keep the text
-    // legible in dark mode so the source list remains usable in bright rooms.
-    const isDormant = !session.ptyActive;
-    const dormantStateStyles =
-      !isActive && isDormant ? "text-sidebar-foreground/92 hover:text-sidebar-foreground" : null;
+    const isHistory = bucket === "history";
+    // Inactive rows recede in two tiers (recent-closed, then history) so the
+    // eye partitions "working / needs me" from "done" at a glance. Hover and
+    // the active route always restore full strength.
+    const isInactive = !isLive && !isActive;
+    const inactiveTextStyles = isInactive
+      ? isHistory
+        ? "text-sidebar-foreground/52 hover:text-sidebar-foreground"
+        : "text-sidebar-foreground/65 hover:text-sidebar-foreground"
+      : null;
+    const displayTitle = sessionDisplayTitle(session);
+    const isUntitled = displayTitle === "Untitled Session";
 
     function startRename() {
       setRenameValue(session.title);
@@ -143,7 +157,7 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
         <SessionContextMenu
           session={session}
           onStartRename={startRename}
-          onRequestDelete={() => setDeleteTarget({ id: sessionId, title: session.title })}
+          onRequestDelete={() => setDeleteTarget({ id: sessionId, title: displayTitle })}
         >
           <SidebarMenuItem
             ref={contextTriggerRef}
@@ -159,10 +173,13 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
               className={cn(
                 "h-7 min-w-0 gap-2 py-0 pl-3.5 pr-8 text-left transition-[background-color,border-color,color,opacity] duration-100",
                 rowFocused && !isActive && interactiveStyles.sidebar.focused,
-                // History rows get a subtler text color unless the dormant
-                // style below applies.
-                bucket === "history" && !isDormant && "text-sidebar-foreground/88",
-                dormantStateStyles,
+                inactiveTextStyles,
+                // Status gutter: a 2px inset edge marks live rows so the eye
+                // can scan the left rail without reading titles. Inset shadow
+                // (not border-l) so the row box never reflows, and it stacks
+                // cleanly with the selection background tint.
+                isRunning && "shadow-[inset_2px_0_0_0_var(--primary)]",
+                isAttention && "shadow-[inset_2px_0_0_0_var(--warning)]",
                 isBeingDragged &&
                   "border-transparent bg-sidebar-interactive-hover text-sidebar-foreground opacity-60",
               )}
@@ -190,7 +207,22 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
                 }}
               >
                 <span className="relative inline-flex w-5 shrink-0 items-center justify-center">
-                  <ProviderIcon provider={session.provider} variant="brand" size={14} />
+                  {/* Color = alive: only live sessions keep the brand-color
+                      logo; inactive rows desaturate so a running session is
+                      findable by scanning for color. Hover restores the row
+                      to full strength as one unit alongside the text. */}
+                  <ProviderIcon
+                    provider={session.provider}
+                    variant="brand"
+                    size={14}
+                    className={cn(
+                      isInactive && [
+                        "grayscale transition-[filter,opacity] duration-100",
+                        "group-hover/menu-item:grayscale-0 group-hover/menu-item:opacity-100",
+                        isHistory ? "opacity-60" : "opacity-70",
+                      ],
+                    )}
+                  />
                   {showStatusIndicator && (
                     <span
                       aria-hidden="true"
@@ -199,9 +231,13 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
                       <StatusDot
                         status={session.status}
                         className={cn(
-                          "size-1.5",
-                          session.status === "needsAttention" && "animate-pulse-dot",
-                          session.status === "running" && "animate-pulse-dot",
+                          // needsAttention is the one signal that demands
+                          // action: bigger dot, warning ring, outward glow.
+                          // Running keeps the gentle heartbeat; live-idle is
+                          // a static muted dot (paused, not gone).
+                          isAttention ? "size-2 ring-1 ring-warning/40" : "size-1.5",
+                          isRunning && "ring-1 ring-black/15 dark:ring-white/20",
+                          statusDotAnimationClass(session.status),
                         )}
                       />
                     </span>
@@ -227,13 +263,14 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
                   ) : (
                     <span
                       className={cn(
-                        "flex min-w-0 items-center gap-1.5 truncate text-[13px] font-normal leading-[1.05rem]",
-                        !session.title && "italic text-muted-foreground",
+                        "flex min-w-0 items-center gap-1.5 truncate text-[13px] leading-[1.05rem]",
+                        // Weight backs up the brightness tier: live/selected
+                        // rows read medium, settled rows read normal.
+                        isLive || isActive ? "font-medium" : "font-normal",
+                        isUntitled && "italic text-muted-foreground",
                       )}
                     >
-                      <span className="min-w-0 truncate">
-                        {session.title || "Untitled Session"}
-                      </span>
+                      <span className="min-w-0 truncate">{displayTitle}</span>
                       {isInSplit && <Columns2 className="size-3 shrink-0 text-primary/70" />}
                     </span>
                   )}
@@ -243,14 +280,18 @@ export const SidebarTreeSessionRow = forwardRef<HTMLButtonElement, SidebarTreeSe
 
             {!isRenaming && (
               <div className="absolute inset-y-0 right-1.5 z-10 flex items-center justify-end">
-                <span
-                  className={cn(
-                    "text-[10px] font-medium tabular-nums text-sidebar-foreground/76 transition-opacity duration-75 group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0",
-                    rowFocused && "opacity-0",
-                  )}
-                >
-                  {timeAgo}
-                </span>
+                {/* History rows drop the timestamp — their group label already
+                    carries recency, and a dozen dates on dead rows is noise. */}
+                {!isHistory && (
+                  <span
+                    className={cn(
+                      "text-[10px] font-normal tabular-nums text-sidebar-foreground/45 transition-opacity duration-75 group-hover/menu-item:opacity-0 group-focus-within/menu-item:opacity-0",
+                      rowFocused && "opacity-0",
+                    )}
+                  >
+                    {timeAgo}
+                  </span>
+                )}
                 <button
                   type="button"
                   data-no-drag

@@ -3,8 +3,9 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { SplitDropOverlay } from "@/components/session/split-drop-zone";
 import { IconButton } from "@/components/ui/icon-button";
 import { SESSION_DROP_EVENT, type SessionDropDetail } from "@/hooks/use-session-drag";
+import { sessionDisplayTitle } from "@/lib/session-helpers";
 import type { SplitPaneSide } from "@/lib/split-view";
-import { StatusDot } from "@/lib/status-icons";
+import { StatusDot, statusDotAnimationClass } from "@/lib/status-icons";
 import { cn } from "@/lib/utils";
 import { useSessionStore } from "@/stores/session-store";
 import { useSplitViewStore } from "@/stores/split-view-store";
@@ -65,9 +66,9 @@ function PaneHeader({ focused, onClose, onFocus, sessionId, side }: PaneHeaderPr
       >
         <StatusDot
           status={session.status}
-          className={cn("size-2 shrink-0", session.status === "running" && "animate-pulse-dot")}
+          className={cn("size-2 shrink-0", statusDotAnimationClass(session.status))}
         />
-        <span className="min-w-0 truncate text-xs font-medium">{session.title}</span>
+        <span className="min-w-0 truncate text-xs font-medium">{sessionDisplayTitle(session)}</span>
       </button>
       <IconButton
         className="size-6 rounded-[4px] border-none bg-transparent text-muted-foreground/72 shadow-none hover:bg-muted/65 hover:text-foreground"

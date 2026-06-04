@@ -1,5 +1,6 @@
 import { createPortal } from "react-dom";
 import { ProviderIcon } from "@/components/icons/provider-icon";
+import { sessionDisplayTitle } from "@/lib/session-helpers";
 import { useSessionStore } from "@/stores/session-store";
 import { useSplitViewStore } from "@/stores/split-view-store";
 
@@ -33,7 +34,7 @@ export function SessionDragGhost() {
       }}
     >
       <ProviderIcon provider={session.provider} variant="brand" size={14} />
-      <span className="min-w-0 truncate">{session.title || "Session"}</span>
+      <span className="min-w-0 truncate">{sessionDisplayTitle(session)}</span>
     </div>,
     document.body,
   );
